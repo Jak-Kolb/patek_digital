@@ -108,7 +108,7 @@ void loop() {
   const uint32_t now = millis();
   if (now - gLastProcess >= kLoopIntervalMs) {
     gLastProcess = now;
-    // process_register_buffer();
+    process_register_buffer();
   }
 
   ble_service::loop();
