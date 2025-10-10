@@ -20,7 +20,7 @@ constexpr size_t kFsChunkSize = 200;  // chunk size used for BLE notifications
 constexpr size_t kRegisterSize = 256;
 
 // Wi-Fi configuration toggle
-#define ENABLE_WIFI 0
+#define ENABLE_WIFI 1
 
 // File operations
 constexpr uint32_t kLoopIntervalMs = 5000;
@@ -29,4 +29,8 @@ constexpr uint32_t kLoopIntervalMs = 5000;
 constexpr char kCmdList[] = "LIST";
 constexpr char kCmdSend[] = "SEND";
 constexpr char kCmdErase[] = "ERASE";
+
+// LED configuration
+constexpr int kBlueLedPin = 2;  // Onboard LED pin for most ESP32 dev boards
+constexpr uint32_t kLedFlashDurationMs = 100;  // LED flash duration for BLE activity
 
