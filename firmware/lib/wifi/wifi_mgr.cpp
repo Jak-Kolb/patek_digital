@@ -30,8 +30,13 @@ bool begin() {
     return WiFi.isConnected();
   }
   gAttempted = true;
+  
+  Serial.println("[WIFI] Initializing WiFi...");
+  Serial.print("[WIFI] MAC Address: ");
+  Serial.println(WiFi.macAddress());
   Serial.print("[WIFI] Connecting to SSID: ");
   Serial.println(WIFI_SSID);
+  
   WiFi.mode(WIFI_STA);
   WiFi.begin(WIFI_SSID, WIFI_PASS);
 
@@ -43,12 +48,25 @@ bool begin() {
   Serial.println();
 
   if (WiFi.status() == WL_CONNECTED) {
-    Serial.print("[WIFI] Connected; IP: ");
+    Serial.println("[WIFI] *** WiFi Connection Successful ***");
+    Serial.print("[WIFI] Connected to SSID: ");
+    Serial.println(WiFi.SSID());
+    Serial.print("[WIFI] IP Address: ");
     Serial.println(WiFi.localIP());
+    Serial.print("[WIFI] MAC Address: ");
+    Serial.println(WiFi.macAddress());
+    Serial.print("[WIFI] Signal Strength: ");
+    Serial.print(WiFi.RSSI());
+    Serial.println(" dBm");
     return true;
   }
 
-  Serial.println("[WIFI] Connection timed out.");
+  Serial.println("[WIFI] *** WiFi Connection Failed ***");
+  Serial.print("[WIFI] Connection timed out after ");
+  Serial.print(kConnectTimeoutMs / 1000);
+  Serial.println(" seconds");
+  Serial.print("[WIFI] WiFi Status: ");
+  Serial.println(WiFi.status());
   return false;
 }
 
@@ -95,6 +113,21 @@ String ip_string() {
   return WiFi.localIP().toString();
 }
 
+String mac_address() {
+#if WIFI_SECRETS_PRESENT
+  return WiFi.macAddress();
+#else
+  return String();
+#endif
+}
+
+String connected_ssid() {
+  if (!is_connected()) {
+    return String();
+  }
+  return WiFi.SSID();
+}
+
 }  // namespace wifi_mgr
 
 #else  // ENABLE_WIFI == 0
@@ -115,6 +148,10 @@ bool is_connected() { return false; }
 bool has_credentials() { return false; }
 
 String ip_string() { return String(); }
+
+String mac_address() { return String(); }
+
+String connected_ssid() { return String(); }
 
 }  // namespace wifi_mgr
 

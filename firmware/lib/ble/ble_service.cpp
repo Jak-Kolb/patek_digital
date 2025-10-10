@@ -46,9 +46,6 @@ class ServerCallbacks : public NimBLEServerCallbacks {
     // Turn off LED immediately when disconnected
     digitalWrite(kBlueLedPin, LOW);  // Turn off LED (active low)
     gLedOffTime = 0;  // Cancel any pending LED off timer
-    
-    // Restart advertising
-    server->startAdvertising();
   }
 };
 
@@ -138,6 +135,13 @@ bool isClientConnected() {
   if (gServer == nullptr) {
     return false;
   }
+  // NimBLEServer may exist but advertising might not yet be ready
+  // Avoid calling getConnectedCount() too early (it can crash pre-init)
+  NimBLEAdvertising* adv = NimBLEDevice::getAdvertising();
+  if (adv == nullptr || !adv->isAdvertising() || !NimBLEDevice::getInitialized()) {
+    return false;
+  }
+
   return gServer->getConnectedCount() > 0;
 }
 

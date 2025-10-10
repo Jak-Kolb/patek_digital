@@ -74,24 +74,41 @@ void setup() {
   Serial.println();
   Serial.println("============================");
   Serial.println("ESP32 Data Node Boot");
+  Serial.println("============================");
 
+  // Initialize filesystem first
   if (!fs_store::begin()) {
     Serial.println("[MAIN] Filesystem init failed.");
   }
 
-  ble_service::begin(handle_command);
-
-  if (wifi_mgr::begin()) {
-    Serial.print("[MAIN] Wi-Fi active: ");
-    Serial.println(wifi_mgr::ip_string());
+  // Attempt WiFi connection first and show detailed status
+  Serial.println("[MAIN] Starting WiFi connection...");
+  bool wifi_success = wifi_mgr::begin();
+  
+  if (wifi_success) {
+    Serial.println("[MAIN] WiFi connection completed successfully.");
+  } else {
+    Serial.println("[MAIN] WiFi connection failed or not configured.");
   }
+  
+  // Small delay before starting BLE
+  delay(500);
+  
+  // Initialize BLE after WiFi attempt
+  Serial.println("[MAIN] Starting BLE service...");
+  ble_service::begin(handle_command);
+  Serial.println("[MAIN] BLE service initialized.");
+  
+  Serial.println("============================");
+  Serial.println("[MAIN] System initialization complete.");
+  Serial.println("============================");
 }
 
 void loop() {
   const uint32_t now = millis();
   if (now - gLastProcess >= kLoopIntervalMs) {
     gLastProcess = now;
-    process_register_buffer();
+    // process_register_buffer();
   }
 
   ble_service::loop();
