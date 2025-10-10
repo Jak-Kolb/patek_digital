@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ESP32 Test App</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <main class="app">
+    <h1>ESP32 Network &amp; BLE Test</h1>
+
+    <section class="card" aria-labelledby="network-scan-title">
+      <div class="card-header">
+        <h2 id="network-scan-title">Network Scan</h2>
+        <button id="scan-button" type="button">Scan Network</button>
+      </div>
+      <p id="network-status" class="status">Press scan to search for ESP32 devices on your network.</p>
+      <ul id="network-results" class="device-list" aria-live="polite"></ul>
+    </section>
+
+    <section class="card" aria-labelledby="ble-title">
+      <div class="card-header">
+        <h2 id="ble-title">BLE Connection</h2>
+        <button id="ble-connect-button" type="button">Connect via BLE</button>
+        <button id="ble-disconnect-button" type="button" class="hidden">Disconnect</button>
+      </div>
+      <p id="ble-status" class="status">Not connected.</p>
+      <div id="ble-controls" class="ble-controls hidden" aria-live="polite">
+        <div class="command-buttons" role="group" aria-label="BLE Commands">
+          <button type="button" class="command-button" data-command="LIST">List Stored Data</button>
+          <button type="button" class="command-button" data-command="SEND">Stream Data</button>
+          <button type="button" class="command-button" data-command="ERASE">Erase Data</button>
+        </div>
+        <div class="response-panel">
+          <h3>Device Responses</h3>
+          <pre id="ble-response-log" class="response-log" tabindex="0"></pre>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <script src="app.js"></script>
+</body>
+</html>
