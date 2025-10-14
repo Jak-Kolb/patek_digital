@@ -3,70 +3,12 @@
 #include <vector>
 
 #include "app_config.h"
-#include "ble/ble_service.h"
-#include "compute/consolidate.h"
-#include "ringbuf/reg_buffer.h"
-#include "storage/fs_store.h"
 #include "wifi/wifi_mgr.h"
+#include "ringbuf/reg_buffer.h"
+#include "compute/consolidate.h"
+#include "storage/fs_store.h"
 
-namespace {
-uint32_t gLastProcess = 0;
-
-void handle_command(const std::string& command) {
-  if (command == kCmdList) {
-    size_t bytes = fs_store::list();
-    ble_service::notifyText(std::to_string(bytes));
-    return;
-  }
-
-  if (command == kCmdSend) {
-    const size_t total_size = fs_store::size();
-    if (total_size == 0) {
-      ble_service::notifyText("EMPTY");
-      return;
-    }
-
-    Serial.printf("[BLE] Streaming %u bytes\n", static_cast<unsigned>(total_size));
-    fs_store::read_chunks(0, total_size, [](const uint8_t* chunk, size_t length) {
-      ble_service::notifyData(chunk, length);
-      delay(20);  // Throttle to avoid overwhelming the BLE stack.
-    });
-    ble_service::notifyText("DONE");
-    return;
-  }
-
-  if (command == kCmdErase) {
-    if (fs_store::erase()) {
-      ble_service::notifyText("ERASED");
-    } else {
-      ble_service::notifyText("ERASE_FAIL");
-    }
-    return;
-  }
-
-  Serial.print("[BLE] Unknown command: ");
-  Serial.println(command.c_str());
-  ble_service::notifyText("UNKNOWN");
-}
-
-void process_register_buffer() {
-  uint8_t snapshot[kRegisterSize];
-  regbuf_write_mock(nullptr, 0);  // Produce demo data until sensors are integrated.
-  regbuf_snapshot(snapshot);
-
-  std::vector<uint8_t> consolidated;
-  consolidate(snapshot, kRegisterSize, consolidated);
-  if (consolidated.empty()) {
-    Serial.println("[MAIN] consolidate() produced empty payload.");
-    return;
-  }
-
-  if (!fs_store::append(consolidated)) {
-    Serial.println("[MAIN] Failed to append consolidated data to FS.");
-  }
-}
-
-}  // namespace
+uint8_t buffer[256];
 
 void setup() {
   Serial.begin(115200);
@@ -77,41 +19,67 @@ void setup() {
   Serial.println("============================");
 
   // Initialize filesystem first
-  if (!fs_store::begin()) {
+  if (!fs_store::begin(true)) { // format on fail is true
     Serial.println("[MAIN] Filesystem init failed.");
+    return; // Don't continue if filesystem fails
+  }
+  else {
+    Serial.println("[MAIN] Filesystem initialized successfully.");
   }
 
+  // Show current data file stats
+
   // Attempt WiFi connection first and show detailed status
-  Serial.println("[MAIN] Starting WiFi connection...");
-  bool wifi_success = wifi_mgr::begin();
-  
-  if (wifi_success) {
-    Serial.println("[MAIN] WiFi connection completed successfully.");
-  } else {
-    Serial.println("[MAIN] WiFi connection failed or not configured.");
-  }
-  
-  // Small delay before starting BLE
-  delay(500);
-  
-  // Initialize BLE after WiFi attempt
-  Serial.println("[MAIN] Starting BLE service...");
-  ble_service::begin(handle_command);
-  Serial.println("[MAIN] BLE service initialized.");
-  
-  Serial.println("============================");
-  Serial.println("[MAIN] System initialization complete.");
-  Serial.println("============================");
+  wifi_mgr::begin();
+  delay(1000);
+
+  // reg_buffer::generate_random_256_bytes(buffer, 256);
+  // Serial.println("Generated 256 bytes of random data:");
+  // for (size_t i = 0; i < 256; ++i) {
+  //   Serial.printf("%d ", buffer[i]);
+  // }
+  // Serial.println();
+
 }
 
 void loop() {
-  const uint32_t now = millis();
-  if (now - gLastProcess >= kLoopIntervalMs) {
-    gLastProcess = now;
-    process_register_buffer();
+  // const uint32_t now = millis();
+  // if (now - gLastProcess >= kLoopIntervalMs) {
+  //   gLastProcess = now;
+  //   // process_register_buffer();
+  // }
+  
+  // ble_service::loop();
+
+  if (wifi_mgr::tick()) {
+    delay(20);
+  }
+  else {
+    Serial.println("WiFi not connected, retrying...");
+    delay(5000);  // Retry every 5 seconds if not connected
   }
 
-  ble_service::loop();
-  wifi_mgr::loop();
-  delay(10);
+
+  // working data generation and storage basic
+  
+  /*
+  reg_buffer::generate_random_256_bytes(buffer, 256);
+
+  Serial.println("Generated 256 bytes of random data:");
+  for (size_t i = 0; i < 256; i++) {
+    Serial.printf("%d ", buffer[i]);
+  }
+  int32_t out[4] = {0};
+
+  consolidate::consolidate(buffer, 256, out);
+  Serial.printf("\nConsolidated to: %d %d %d %d\n", out[0], out[1], out[2], out[3]);
+  fs_store::append(out);
+  fs_store::printData();
+  */
+
+  // Serial.println();
+
+  delay(1000);
 }
+
+

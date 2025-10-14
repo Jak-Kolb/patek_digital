@@ -1,140 +1,96 @@
 #include "fs_store.h"
-
 #include <Arduino.h>
 #include <LittleFS.h>
 
 #include "app_config.h"
 
+
+
 namespace fs_store {
-namespace {
-bool gMounted = false;
 
-bool ensure_mounted() {
-  if (gMounted) {
-    return true;
-  }
-  if (LittleFS.begin(true)) {
-    gMounted = true;
-    return true;
-  }
-  Serial.println("[FS] Initial mount failed; attempting format...");
-  if (!LittleFS.format()) {
-    Serial.println("[FS] Format failed.");
-    return false;
-  }
-  gMounted = LittleFS.begin();
-  if (!gMounted) {
-    Serial.println("[FS] Mount failed after format.");
-  }
-  return gMounted;
-}
+const char* partition_name = "littlefs";
+static const char* data_file_path = "/stored_data.bin";
+// Partition base address (flash offset) as defined in partitions_3m_fs.csv
+static const size_t PARTITION_BASE_ADDR = 0x200000;
 
-}  // namespace
+bool begin(bool formatOnFail) {
+  
+  // Attempt to mount LittleFS, formatting if necessary.
+  // Provide mount path and partition label to avoid defaulting to "spiffs" partition name.
+  if (!LittleFS.begin(formatOnFail, "/littlefs", 5, "littlefs")) {
+    // If first attempt failed and formatOnFail was false, try formatting once.
+    if (!formatOnFail && !LittleFS.begin(true, "/littlefs", 5, "littlefs")) {
+      return false;
+    }
+  }
 
-bool begin() {
-  return ensure_mounted();
-}
+  Serial.printf("LittleFS total=%u used=%u free≈%u bytes\n",
+                (unsigned)LittleFS.totalBytes(),
+                (unsigned)LittleFS.usedBytes(),
+                (unsigned)(LittleFS.totalBytes() - LittleFS.usedBytes()));
 
-size_t size() {
-  if (!ensure_mounted()) {
-    return 0;
-  }
-  File f = LittleFS.open(kFsDataPath, FILE_READ);
-  if (!f) {
-    return 0;
-  }
-  const size_t len = f.size();
-  f.close();
-  return len;
-}
-
-bool append(const std::vector<uint8_t>& data) {
-  if (data.empty()) {
-    return true;
-  }
-  if (!ensure_mounted()) {
-    return false;
-  }
-  File f = LittleFS.open(kFsDataPath, FILE_APPEND);
-  if (!f) {
-    Serial.println("[FS] Failed to open data file for append.");
-    return false;
-  }
-  const size_t written = f.write(data.data(), data.size());
-  f.close();
-  if (written != data.size()) {
-    Serial.println("[FS] Short write detected.");
-    return false;
-  }
+  File fp = LittleFS.open(data_file_path, "a"); // Ensure file exists
+  if (!fp) return false;
+  fp.close();
   return true;
+
 }
 
-size_t list() {
-  if (!ensure_mounted()) {
-    return 0;
-  }
-  const size_t bytes = size();
-  Serial.print("[FS] File: ");
-  Serial.print(kFsDataPath);
-  Serial.print(" bytes=");
-  Serial.println(bytes);
-  return bytes;
+// append 4 int32_t values to file
+bool append(const int32_t vals[4]){
+  File fp = LittleFS.open(data_file_path, "a");
+  if (!fp) return false;
+  size_t written = fp.write((const uint8_t*)vals, sizeof(int32_t)*4);
+  fp.close();
+  return written == sizeof(int32_t)*4;
 }
 
-bool read_chunks(size_t offset, size_t length,
-                 const std::function<void(const uint8_t*, size_t)>& on_chunk) {
-  if (!ensure_mounted()) {
-    return false;
+// print data in filesystem
+void printData() {
+  File fp = LittleFS.open(data_file_path, "r");
+  if (!fp) {
+    Serial.println("fs_store: Failed to open data file for reading");
+    return;
   }
-  size_t total_size = size();
-  if (offset >= total_size) {
-    return false;
-  }
-  if (length == 0 || offset + length > total_size) {
-    length = total_size - offset;
-  }
-  File f = LittleFS.open(kFsDataPath, FILE_READ);
-  if (!f) {
-    Serial.println("[FS] Failed to open data file for reading.");
-    return false;
-  }
-  if (!f.seek(offset)) {
-    Serial.println("[FS] Seek failed.");
-    f.close();
-    return false;
-  }
-
-  std::vector<uint8_t> buffer(kFsChunkSize);
-  size_t remaining = length;
-  while (remaining > 0) {
-    size_t to_read = remaining < buffer.size() ? remaining : buffer.size();
-    size_t read = f.read(buffer.data(), to_read);
-    if (read == 0) {
+  Serial.println("fs_store: Stored Data (offset | abs_addr):");
+  while (fp.available()) {
+    size_t offset = fp.position();
+    int32_t vals[4];
+    size_t read = fp.read((uint8_t*)vals, sizeof(int32_t)*4);
+    if (read != sizeof(int32_t)*4) {
+      Serial.println("fs_store: Incomplete data read");
       break;
     }
-    if (on_chunk) {
-      on_chunk(buffer.data(), read);
-    }
-    remaining -= read;
+    size_t abs_addr = PARTITION_BASE_ADDR + offset;
+    Serial.printf("fs_store: offset=%6u | addr=0x%06X: %d %d %d %d\n", (unsigned)offset, (unsigned)abs_addr, vals[0], vals[1], vals[2], vals[3]);
   }
-  f.close();
-  return true;
+  fp.close();
 }
 
-bool erase() {
-  if (!ensure_mounted()) {
-    return false;
+
+// return size of filesystem
+size_t size() {
+  if (!LittleFS.exists(data_file_path)) {
+    return 0;
   }
-  if (!LittleFS.exists(kFsDataPath)) {
-    Serial.println("[FS] Nothing to erase.");
-    return true;
+
+  File file = LittleFS.open(data_file_path, "r");
+  if (!file) {
+    Serial.println("fs_store: Failed to open data file for size check");
+    return 0;
   }
-  if (!LittleFS.remove(kFsDataPath)) {
-    Serial.println("[FS] Failed to remove data file.");
-    return false;
-  }
-  Serial.println("[FS] Data file erased.");
-  return true;
+  
+  size_t fileSize = file.size();
+  file.close();
+  return fileSize;
 }
+ 
+bool erase() {
+  if (LittleFS.exists(data_file_path)) {
+    return LittleFS.remove(data_file_path);
+  }
+  return true; // File doesn't exist, consider it "erased"
 
 }  // namespace fs_store
+}
+

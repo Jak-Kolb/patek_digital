@@ -6,4 +6,8 @@
 
 // Performs a placeholder consolidation of raw register data into a compact payload.
 // The current implementation is deterministic but trivial; replace with sensor-aware logic later.
-void consolidate(const uint8_t* input, size_t length, std::vector<uint8_t>& output);
+
+namespace consolidate {
+    void consolidate(const uint8_t* input_buffer, size_t length, int32_t out[4]);
+
+}  // namespace consolidate
