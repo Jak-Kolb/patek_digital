@@ -12,24 +12,7 @@ const PORT = process.env.PORT || 5173;
 
 // Known Espressif (ESP32) MAC address prefixes (OUIs)
 const ESPRESSIF_OUIS = new Set([
-  "24:0A:C4",
-  "30:AE:A4",
-  "34:86:5D",
-  "3C:71:BF",
-  "40:22:D8",
   "44:1D:64", // Additional ESP32 OUI
-  "84:CC:A8",
-  "84:F7:03",
-  "A4:CF:12",
-  "B4:E6:2D",
-  "BC:DD:C2",
-  "C4:4F:33",
-  "CC:50:E3",
-  "D8:A0:1D",
-  "EC:62:60",
-  "EC:94:CB",
-  "EC:FA:BC",
-  "F4:12:FA",
 ]);
 
 app.use(cors());
