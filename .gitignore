@@ -4,6 +4,7 @@ Thumbs.db
 .vscode/
 .env
 .env.*
+.maintest.cpp
 
 # PlatformIO
 firmware/.pio
