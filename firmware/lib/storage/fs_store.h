@@ -8,7 +8,7 @@
 namespace fs_store {
 
 // Mount LittleFS, formatting if required.
-bool begin();
+bool begin(bool formatOnFail);
 
 // Return total bytes stored in the consolidated data file.
 size_t size();
@@ -16,8 +16,7 @@ size_t size();
 // Append binary data to the consolidated file.
 bool append(const std::vector<uint8_t>& data);
 
-// Enumerate stored dataset metadata. Returns current file size.
-size_t list();
+void printData(); // print data stored in filesystem 
 
 // Read a portion of the file and invoke the callback for each chunk.
 bool read_chunks(size_t offset, size_t length,

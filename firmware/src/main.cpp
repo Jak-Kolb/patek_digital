@@ -10,7 +10,6 @@
 
 uint8_t buffer[256];
 
-
 void setup() {
   Serial.begin(115200);
   delay(200);
@@ -20,13 +19,15 @@ void setup() {
   Serial.println("============================");
 
   // Initialize filesystem first
-  if (!fs_store::begin()) {
+  if (!fs_store::begin(true)) { // format on fail is true
     Serial.println("[MAIN] Filesystem init failed.");
     return; // Don't continue if filesystem fails
   }
+  else {
+    Serial.println("[MAIN] Filesystem initialized successfully.");
+  }
 
   // Show current data file stats
-  fs_store::list();
 
   // Attempt WiFi connection first and show detailed status
   wifi_mgr::begin();
