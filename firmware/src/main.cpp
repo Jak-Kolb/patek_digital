@@ -33,12 +33,12 @@ void setup() {
   wifi_mgr::begin();
   delay(1000);
 
-  reg_buffer::generate_random_256_bytes(buffer, 256);
-  Serial.println("Generated 256 bytes of random data:");
-  for (size_t i = 0; i < 256; ++i) {
-    Serial.printf("%d ", buffer[i]);
-  }
-  Serial.println();
+  // reg_buffer::generate_random_256_bytes(buffer, 256);
+  // Serial.println("Generated 256 bytes of random data:");
+  // for (size_t i = 0; i < 256; ++i) {
+  //   Serial.printf("%d ", buffer[i]);
+  // }
+  // Serial.println();
 
 }
 
@@ -52,14 +52,17 @@ void loop() {
   // ble_service::loop();
 
   if (wifi_mgr::tick()) {
-    delay(1000);
+    delay(20);
   }
   else {
     Serial.println("WiFi not connected, retrying...");
     delay(5000);  // Retry every 5 seconds if not connected
   }
 
-  // Generate and print random data
+
+  // working data generation and storage basic
+  
+  /*
   reg_buffer::generate_random_256_bytes(buffer, 256);
 
   Serial.println("Generated 256 bytes of random data:");
@@ -67,9 +70,16 @@ void loop() {
     Serial.printf("%d ", buffer[i]);
   }
   int32_t out[4] = {0};
+
   consolidate::consolidate(buffer, 256, out);
-  
-  Serial.println();
+  Serial.printf("\nConsolidated to: %d %d %d %d\n", out[0], out[1], out[2], out[3]);
+  fs_store::append(out);
+  fs_store::printData();
+  */
+
+  // Serial.println();
+
+  delay(1000);
 }
 
 

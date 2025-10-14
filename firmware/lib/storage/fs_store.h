@@ -13,16 +13,11 @@ bool begin(bool formatOnFail);
 // Return total bytes stored in the consolidated data file.
 size_t size();
 
-// Append binary data to the consolidated file.
-bool append(const std::vector<uint8_t>& data);
+bool append(const int32_t vals[4]); // Append binary data to the consolidated file.
 
 void printData(); // print data stored in filesystem 
 
-// Read a portion of the file and invoke the callback for each chunk.
-bool read_chunks(size_t offset, size_t length,
-                 const std::function<void(const uint8_t*, size_t)>& on_chunk);
+bool erase(); // Remove the consolidated file.
 
-// Remove the consolidated file.
-bool erase();
 
 }  // namespace fs_store
