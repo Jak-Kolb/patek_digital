@@ -1,11 +1,10 @@
 #include "wifi_mgr.h"
-
-#include <Arduino.h>
-
+// #include <Arduino.h>
 #include "app_config.h"
 
-#if ENABLE_WIFI
+// #if ENABLE_WIFI
 #include <WiFi.h>
+// #else
 
 #if __has_include(<wifi_secrets.h>)
 #include <wifi_secrets.h>
@@ -14,145 +13,53 @@
 #define WIFI_SECRETS_PRESENT 0
 #endif
 
-namespace {
-constexpr uint32_t kConnectTimeoutMs = 15000;
-bool gAttempted = false;
-}
-
 namespace wifi_mgr {
 
-bool begin() {
-  if (!has_credentials()) {
-    Serial.println("[WIFI] Credentials missing; skipping connection.");
-    return false;
-  }
-  if (gAttempted) {
-    return WiFi.isConnected();
-  }
-  gAttempted = true;
-  
-  Serial.println("[WIFI] Initializing WiFi...");
-  Serial.print("[WIFI] MAC Address: ");
-  Serial.println(WiFi.macAddress());
-  Serial.print("[WIFI] Connecting to SSID: ");
-  Serial.println(WIFI_SSID);
-  
+void begin() {
+  Serial.begin(115200);
+  delay(200);
+
   WiFi.mode(WIFI_STA);
   WiFi.begin(WIFI_SSID, WIFI_PASS);
 
-  const uint32_t start = millis();
-  while (WiFi.status() != WL_CONNECTED && millis() - start < kConnectTimeoutMs) {
-    delay(250);
-    Serial.print('.');
-  }
-  Serial.println();
+  Serial.printf("[WIFI] Connecting to %s\n", WIFI_SSID);
 
-  if (WiFi.status() == WL_CONNECTED) {
-    Serial.println("[WIFI] *** WiFi Connection Successful ***");
-    Serial.print("[WIFI] Connected to SSID: ");
-    Serial.println(WiFi.SSID());
-    Serial.print("[WIFI] IP Address: ");
-    Serial.println(WiFi.localIP());
-    Serial.print("[WIFI] MAC Address: ");
-    Serial.println(WiFi.macAddress());
-    Serial.print("[WIFI] Signal Strength: ");
-    Serial.print(WiFi.RSSI());
-    Serial.println(" dBm");
-    return true;
+  uint32_t start = millis();
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(500);
+    Serial.print(".");
+    if (millis() - start > 10000) {  // 10 second timeout
+      Serial.println("\n[WIFI] Connection timed out.");
+      Serial.println("\nRetrying...");
+      WiFi.disconnect(true);
+      WiFi.begin(WIFI_SSID, WIFI_PASS);
+      start = millis();
+      return;
+    }
   }
 
-  Serial.println("[WIFI] *** WiFi Connection Failed ***");
-  Serial.print("[WIFI] Connection timed out after ");
-  Serial.print(kConnectTimeoutMs / 1000);
-  Serial.println(" seconds");
-  Serial.print("[WIFI] WiFi Status: ");
-  Serial.println(WiFi.status());
-  return false;
-}
+  Serial.println("\nWiFi connected!");
+  Serial.print("IP address: ");
+  Serial.println(WiFi.localIP());
 
-void loop() {
-  if (!gAttempted || !has_credentials()) {
-    return;
-  }
-  if (WiFi.isConnected()) {
-    return;
-  }
-  static uint32_t lastAttempt = 0;
-  const uint32_t now = millis();
-  if (now - lastAttempt < 10000) {
-    return;
-  }
-  lastAttempt = now;
-  Serial.println("[WIFI] Attempting reconnection...");
-  WiFi.reconnect();
-}
-
-void disconnect() {
-  if (!has_credentials()) {
-    return;
-  }
-  WiFi.disconnect();
 }
 
 bool is_connected() {
-  return has_credentials() && WiFi.isConnected();
+  return WiFi.status() == WL_CONNECTED;
 }
 
-bool has_credentials() {
-#if WIFI_SECRETS_PRESENT
-  return true;
-#else
-  return false;
-#endif
-}
-
-String ip_string() {
-  if (!is_connected()) {
-    return String();
+bool tick() {
+  // Nothing needed here for now
+  if (is_connected()) {
+    // Optionally, print signal strength or other info
+    Serial.printf("Wifi Connected to %s\n", WiFi.SSID());
+    return 1;
   }
-  return WiFi.localIP().toString();
-}
-
-String mac_address() {
-#if WIFI_SECRETS_PRESENT
-  return WiFi.macAddress();
-#else
-  return String();
-#endif
-}
-
-String connected_ssid() {
-  if (!is_connected()) {
-    return String();
+  else {
+    Serial.println("Wifi Not Connected");
+    begin();
+    return 0;
   }
-  return WiFi.SSID();
 }
 
 }  // namespace wifi_mgr
-
-#else  // ENABLE_WIFI == 0
-
-namespace wifi_mgr {
-
-bool begin() {
-  Serial.println("[WIFI] Disabled via ENABLE_WIFI=0.");
-  return false;
-}
-
-void loop() {}
-
-void disconnect() {}
-
-bool is_connected() { return false; }
-
-bool has_credentials() { return false; }
-
-String ip_string() { return String(); }
-
-String mac_address() { return String(); }
-
-String connected_ssid() { return String(); }
-
-}  // namespace wifi_mgr
-
-#endif

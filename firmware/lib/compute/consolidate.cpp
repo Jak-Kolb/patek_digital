@@ -4,21 +4,28 @@
 
 #include "app_config.h"
 
-void consolidate(const uint8_t* input, size_t length, std::vector<uint8_t>& output) {
-  output.clear();
-  if (input == nullptr || length == 0) {
+namespace consolidate {
+
+void consolidate(const uint8_t* input_buffer, size_t length, int32_t out[4]) {
+
+  if (input_buffer == nullptr || length != kRegisterSize) {
     return;
   }
-
-  const size_t copy_len = std::min<size_t>(length, 32);
-  output.insert(output.end(), input, input + copy_len);
-
-  uint8_t checksum = 0;
-  for (size_t i = 0; i < copy_len; ++i) {
-    checksum ^= input[i];
+  
+  size_t num = 0;
+  for (size_t i = 0; i < 256; i++) { // consolidate 256 byte buffer into 4 int32_t values
+    num += input_buffer[i];
+    if (i % 64 == 63)
+    {
+      out[i / 64] = num / 64;
+      num = 0;
+    }
   }
-  output.push_back(checksum);
+  Serial.println("Consolidated data:");
+  for (size_t i = 0; i < 4; i++) {
+    Serial.printf("%d ", out[i]);
+  }
+  Serial.println();
+}
 
-  // TODO: Replace the naive copy/XOR checksum with domain-specific encoding (e.g. delta compression).
-  // TODO: Include device metadata (timestamp, sensor flags, error codes) once available.
 }

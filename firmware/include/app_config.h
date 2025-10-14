@@ -1,7 +1,8 @@
 #pragma once
 
 #include <stdint.h>
-
+#include <iostream>
+#include <Arduino.h>
 // General configuration values for the firmware application.
 
 // Device identification
