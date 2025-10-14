@@ -7,8 +7,10 @@
 #include "ringbuf/reg_buffer.h"
 #include "compute/consolidate.h"
 #include "storage/fs_store.h"
+#include "ble/ble_service.h"
 
 uint8_t buffer[256];
+
 
 void setup() {
   Serial.begin(115200);
@@ -30,9 +32,12 @@ void setup() {
   // Show current data file stats
 
   // Attempt WiFi connection first and show detailed status
+
   wifi_mgr::begin();
   delay(1000);
 
+  bleServer.begin();
+  Serial.println("BLE server started.");
   // reg_buffer::generate_random_256_bytes(buffer, 256);
   // Serial.println("Generated 256 bytes of random data:");
   // for (size_t i = 0; i < 256; ++i) {
@@ -58,10 +63,12 @@ void loop() {
     Serial.println("WiFi not connected, retrying...");
     delay(5000);  // Retry every 5 seconds if not connected
   }
+  static uint8_t data[4] = {0, 1, 2, 3};
+  bleServer.transfer(data);
+  for(int i=0; i<4; i++) data[i]++;
 
 
   // working data generation and storage basic
-  
   /*
   reg_buffer::generate_random_256_bytes(buffer, 256);
 

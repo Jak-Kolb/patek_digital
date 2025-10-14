@@ -1,27 +1,44 @@
-#pragma once
 
-#include <cstddef>
+#ifndef BLE_SERVER_H
+#define BLE_SERVER_H
+
+#include <NimBLEDevice.h>
+#include <Arduino.h>
 #include <cstdint>
-#include <functional>
-#include <string>
 
-namespace ble_service {
+class BLEServerClass {
+public:
+  void begin();
+  void transfer(uint8_t data[4]);
 
-using ControlCommandCallback = std::function<void(const std::string& command)>;
+private:
+  NimBLEServer* pServer = nullptr;
+  NimBLECharacteristic* pCharacteristic = nullptr;
+  bool deviceConnected = false;
 
-// Initialize NimBLE, create the service/characteristics, and begin advertising.
-void begin(ControlCommandCallback callback);
+  class ServerCallbacks : public NimBLEServerCallbacks {
+  public:
+    ServerCallbacks(BLEServerClass* parent) : pParent(parent) {}
 
-// Notify subscribed clients with binary data pulled from persistent storage.
-void notifyData(const uint8_t* data, size_t length);
+    void onConnect(NimBLEServer* pServer) override {
+      pParent->deviceConnected = true;
+      Serial.println("BLE device connected.");
+    }
 
-// Notify subscribed clients with a UTF-8 encoded status message.
-void notifyText(const std::string& message);
+    void onDisconnect(NimBLEServer* pServer) override {
+      pParent->deviceConnected = false;
+      Serial.println("BLE device disconnected.");
+    }
 
-// Returns true if at least one BLE central is connected.
-bool isClientConnected();
+  private:
+    BLEServerClass* pParent;
+  };
 
-// Pump BLE housekeeping logic. Safe to call from loop().
-void loop();
+  ServerCallbacks serverCallbacks{this};
+};
 
-}  // namespace ble_service
+extern BLEServerClass bleServer;
+
+#endif
+
+
