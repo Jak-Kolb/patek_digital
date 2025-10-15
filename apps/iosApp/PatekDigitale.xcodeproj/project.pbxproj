@@ -7,14 +7,14 @@
 	objects = {
 
 /* Begin PBXFileReference section */
-		9D00CF6D2E9D9F1A00A1B910 /* PatekDigitale.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = PatekDigitale.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		6507AEEF2E9F62D000BFC00B /* PatekDigitale.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = PatekDigitale.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
 		9D839F022E9EF2B00068AD13 /* Exceptions for "PatekDigitale" folder in "PatekDigitale" target */ = {
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
 			membershipExceptions = (
-				Info.plist,
+				Resources/Info.plist,
 			);
 			target = 9D00CF6C2E9D9F1A00A1B910 /* PatekDigitale */;
 		};
@@ -46,16 +46,8 @@
 			isa = PBXGroup;
 			children = (
 				9D839EFC2E9EF1F80068AD13 /* PatekDigitale */,
-				9D00CF6E2E9D9F1A00A1B910 /* Products */,
+				6507AEEF2E9F62D000BFC00B /* PatekDigitale.app */,
 			);
-			sourceTree = "<group>";
-		};
-		9D00CF6E2E9D9F1A00A1B910 /* Products */ = {
-			isa = PBXGroup;
-			children = (
-				9D00CF6D2E9D9F1A00A1B910 /* PatekDigitale.app */,
-			);
-			name = Products;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -80,7 +72,7 @@
 			packageProductDependencies = (
 			);
 			productName = PatekDigitale;
-			productReference = 9D00CF6D2E9D9F1A00A1B910 /* PatekDigitale.app */;
+			productReference = 6507AEEF2E9F62D000BFC00B /* PatekDigitale.app */;
 			productType = "com.apple.product-type.application";
 		};
 /* End PBXNativeTarget section */
@@ -108,7 +100,7 @@
 			mainGroup = 9D00CF642E9D9F1A00A1B910;
 			minimizedProjectReferenceProxies = 1;
 			preferredProjectObjectVersion = 77;
-			productRefGroup = 9D00CF6E2E9D9F1A00A1B910 /* Products */;
+			productRefGroup = 9D00CF642E9D9F1A00A1B910;
 			projectDirPath = "";
 			projectRoot = "";
 			targets = (
@@ -268,7 +260,7 @@
 				CURRENT_PROJECT_VERSION = 1;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
-				INFOPLIST_FILE = PatekDigitale/Info.plist;
+				INFOPLIST_FILE = PatekDigitale/Resources/Info.plist;
 				INFOPLIST_KEY_NSBluetoothAlwaysUsageDescription = "This app needs Bluetooth to connect to your health band.";
 				INFOPLIST_KEY_NSBluetoothPeripheralUsageDescription = "This app needs Bluetooth to connect to your health band.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
@@ -298,7 +290,7 @@
 				CURRENT_PROJECT_VERSION = 1;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
-				INFOPLIST_FILE = PatekDigitale/Info.plist;
+				INFOPLIST_FILE = PatekDigitale/Resources/Info.plist;
 				INFOPLIST_KEY_NSBluetoothAlwaysUsageDescription = "This app needs Bluetooth to connect to your health band.";
 				INFOPLIST_KEY_NSBluetoothPeripheralUsageDescription = "This app needs Bluetooth to connect to your health band.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
