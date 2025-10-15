@@ -18,6 +18,9 @@ struct HealthReadingData: Codable {
 }
 
 class BLEManager: NSObject, ObservableObject, CBCentralManagerDelegate, CBPeripheralDelegate {
+    // Health repo
+    private var healthRepository: HealthRepository?
+    
     // Instance & peripheral variables
     var centralManager: CBCentralManager!
     var discoveredPeripheral: CBPeripheral?
@@ -31,6 +34,7 @@ class BLEManager: NSObject, ObservableObject, CBCentralManagerDelegate, CBPeriph
     
     // UUIDs (replace with actual)
     let espServiceUUID = CBUUID(string: "00000000-0000-0000-0000-000000000001")
+    let configUUID = CBUUID(string: "00000000-0000-0000-0000-000000000006")
     
     let heartRateUUID = CBUUID(string: "00000000-0000-0000-0000-000000000002")
     let stepCountUUID = CBUUID(string: "00000000-0000-0000-0000-000000000003")
@@ -42,6 +46,8 @@ class BLEManager: NSObject, ObservableObject, CBCentralManagerDelegate, CBPeriph
     
     // Observable variables
     @Published var isConnected = false;
+    @Published var connectionError: String? = nil
+    
     @Published var heartRate: Int = 0
     @Published var stepCount: Int = 0
     @Published var batteryLevel: Int = 0
@@ -103,14 +109,6 @@ class BLEManager: NSObject, ObservableObject, CBCentralManagerDelegate, CBPeriph
 
         peripheral.delegate = self
         peripheral.discoverServices([espServiceUUID])
-    }
-    
-    // Called when peripheral disconnects or fails
-    func centralManager(_ central: CBCentralManager, didDisconnectPeripheral peripheral: CBPeripheral, error: Error?) {
-        print("Disconnected")
-        isConnected = false
-        
-        startScanning()
     }
     
     // Handle service discovery
@@ -220,6 +218,49 @@ class BLEManager: NSObject, ObservableObject, CBCentralManagerDelegate, CBPeriph
     func stopMockUpdates() {
         mockTimer?.invalidate()
         mockTimer = nil
+    }
+    
+    // Automatic reconnection logic
+    func centralManager(_ central: CBCentralManager, didDisconnectPeripheral peripheral: CBPeripheral, error: Error?) {
+        print("Disconnected")
+        isConnected = false
+        connectionError = error?.localizedDescription
+  
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
+            self.startScanning()
+        }
+    }
+
+    // Write configuration to ESP32
+    func sendConfiguration(samplingInterval: Int, notificationsEnabled: Bool) {
+        guard let peripheral = discoveredPeripheral else { return }
+        let configData = Data([UInt8(samplingInterval), notificationsEnabled ? 1 : 0])
+        if let configChar = findCharacteristic(uuid: configUUID) {
+            peripheral.writeValue(configData, for: configChar, type: .withResponse)
+        }
+    }
+
+    // Helper to find characteristic by UUID
+    func findCharacteristic(uuid: CBUUID) -> CBCharacteristic? {
+        guard let services = discoveredPeripheral?.services else { return nil }
+        for service in services {
+            if let chars = service.characteristics {
+                for char in chars where char.uuid == uuid {
+                    return char
+                }
+            }
+        }
+        return nil
+    }
+
+    // Error handling for failed connections
+    func centralManager(_ central: CBCentralManager, didFailToConnect peripheral: CBPeripheral, error: Error?) {
+        print("Failed to connect: \(error?.localizedDescription ?? "Unknown error")")
+        connectionError = error?.localizedDescription
+        // Retry connection
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
+            self.startScanning()
+        }
     }
 
 }
