@@ -6,11 +6,8 @@ const bleDisconnectButton = document.getElementById("ble-disconnect-button");
 const bleStatus = document.getElementById("ble-status");
 const bleControls = document.getElementById("ble-controls");
 const responseLog = document.getElementById("ble-response-log");
-const commandButtons = Array.from(document.querySelectorAll(".command-button"));
-
-const BLE_SERVICE_UUID = "12345678-1234-5678-1234-56789abc0000";
-const BLE_DATA_CHAR_UUID = "12345678-1234-5678-1234-56789abc1001";
-const BLE_CONTROL_CHAR_UUID = "12345678-1234-5678-1234-56789abc1002";
+const BLE_SERVICE_UUID = "4fafc201-1fb5-459e-8fcc-c5c9c331914b";
+const BLE_CHARACTERISTIC_UUID = "beb5483e-36e1-4688-b7f5-ea07361b26a8";
 
 function canonicalUuid(uuidLike) {
   if (!uuidLike) {
@@ -34,16 +31,9 @@ const bleSession = {
   server: null,
   service: null,
   dataCharacteristic: null,
-  controlCharacteristic: null,
 };
 
 const responseHistory = [];
-
-function toggleCommandButtons(disabled) {
-  commandButtons.forEach((button) => {
-    button.disabled = disabled;
-  });
-}
 
 function toggleConnectionButtons(connected) {
   if (bleConnectButton) {
@@ -73,8 +63,6 @@ function showBleControls(visible) {
   } else {
     bleControls.classList.add("hidden");
   }
-
-  toggleCommandButtons(!visible);
   toggleConnectionButtons(visible);
 }
 
@@ -103,31 +91,47 @@ function appendResponse(direction, message) {
   responseLog.scrollTop = responseLog.scrollHeight;
 }
 
-function decodeNotification(dataView) {
-  const bytes = new Uint8Array(
+function formatNotification(dataView) {
+  if (!(dataView instanceof DataView)) {
+    return String(dataView);
+  }
+
+  const view = new DataView(
     dataView.buffer,
     dataView.byteOffset,
     dataView.byteLength
   );
+  const bytes = new Uint8Array(view.buffer, view.byteOffset, view.byteLength);
   if (!bytes.length) {
     return "(no data)";
   }
 
-  try {
-    const decoded = new TextDecoder("utf-8", { fatal: false }).decode(bytes);
-    const hasControlChars = /[\u0000-\u0008\u000B\u000C\u000E-\u001F]/.test(
-      decoded
-    );
-    if (!hasControlChars) {
-      return decoded.trim() || decoded;
+  const hex = Array.from(bytes)
+    .map((value) => value.toString(16).padStart(2, "0"))
+    .join(" ");
+
+  const parts = [`hex ${hex}`];
+
+  if (bytes.length >= 4) {
+    const little = view.getUint32(0, true);
+    const big = view.getUint32(0, false);
+    parts.push(`u32-le ${little}`);
+    if (big !== little) {
+      parts.push(`u32-be ${big}`);
     }
-  } catch (error) {
-    // Fall back to hex formatting below
   }
 
-  return `0x${Array.from(bytes)
-    .map((b) => b.toString(16).padStart(2, "0"))
-    .join(" ")}`;
+  try {
+    const text = new TextDecoder("utf-8", { fatal: false }).decode(bytes);
+    const printable = text.replace(/[\u0000-\u001F\u007F]/g, "").trim();
+    if (printable) {
+      parts.push(`text "${printable}"`);
+    }
+  } catch (error) {
+    // Ignore UTF-8 decode issues and keep numeric formats only.
+  }
+
+  return parts.join(" | ");
 }
 
 function resetBleSession(message) {
@@ -154,7 +158,6 @@ function resetBleSession(message) {
   bleSession.server = null;
   bleSession.service = null;
   bleSession.dataCharacteristic = null;
-  bleSession.controlCharacteristic = null;
 
   showBleControls(false);
 
@@ -165,8 +168,8 @@ function resetBleSession(message) {
 }
 
 function handleNotification(event) {
-  const text = decodeNotification(event.target.value);
-  appendResponse("receive", text);
+  const formatted = formatNotification(event.target.value);
+  appendResponse("receive", formatted);
 }
 
 function renderNetworkDevices(devices) {
@@ -241,7 +244,11 @@ async function connectBle() {
 
     const primaryUuid = canonicalUuid(BLE_SERVICE_UUID);
     const device = await navigator.bluetooth.requestDevice({
-      filters: [{ namePrefix: "ESP32" }],
+      filters: [
+        { namePrefix: "ESP32" },
+        { name: "ESP32_NimBLE_Server" },
+        { services: [primaryUuid] },
+      ],
       optionalServices: ["battery_service", primaryUuid],
     });
 
@@ -266,11 +273,8 @@ async function connectBle() {
       throw serviceError;
     }
 
-    const controlCharacteristic = await service.getCharacteristic(
-      canonicalUuid(BLE_CONTROL_CHAR_UUID)
-    );
     const dataCharacteristic = await service.getCharacteristic(
-      canonicalUuid(BLE_DATA_CHAR_UUID)
+      canonicalUuid(BLE_CHARACTERISTIC_UUID)
     );
 
     await dataCharacteristic.startNotifications();
@@ -282,7 +286,6 @@ async function connectBle() {
     bleSession.device = device;
     bleSession.server = server;
     bleSession.service = service;
-    bleSession.controlCharacteristic = controlCharacteristic;
     bleSession.dataCharacteristic = dataCharacteristic;
 
     showBleControls(true);
@@ -315,50 +318,9 @@ async function disconnectBle() {
     bleDisconnectButton.disabled = false;
   }
 }
-
-async function sendBleCommand(command) {
-  if (!bleSession.controlCharacteristic) {
-    bleStatus.textContent = "Connect to a device before sending commands.";
-    appendResponse(
-      "error",
-      "Attempted to send command without an active BLE connection."
-    );
-    return;
-  }
-
-  try {
-    const encoder = new TextEncoder();
-    const payload = encoder.encode(command);
-    appendResponse("send", command);
-    await bleSession.controlCharacteristic.writeValueWithResponse(payload);
-    bleStatus.textContent = `Command "${command}" sent.`;
-  } catch (error) {
-    const message = `Failed to send "${command}": ${error.message || error}`;
-    bleStatus.textContent = message;
-    appendResponse("error", message);
-  }
-}
-
 scanButton.addEventListener("click", scanNetwork);
 bleConnectButton.addEventListener("click", connectBle);
 bleDisconnectButton.addEventListener("click", disconnectBle);
-
-if (bleControls) {
-  bleControls.addEventListener("click", (event) => {
-    const { target } = event;
-    if (!(target instanceof HTMLButtonElement)) {
-      return;
-    }
-
-    const command = target.dataset.command;
-    if (!command) {
-      return;
-    }
-
-    event.preventDefault();
-    sendBleCommand(command);
-  });
-}
 
 document.addEventListener("DOMContentLoaded", () => {
   networkStatus.textContent =

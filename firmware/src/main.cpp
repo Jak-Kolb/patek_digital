@@ -7,6 +7,7 @@
 #include "ringbuf/reg_buffer.h"
 #include "compute/consolidate.h"
 #include "storage/fs_store.h"
+#include "compute/mockdata.h"
 #include "ble/ble_service.h"
 
 uint8_t buffer[256];
@@ -32,6 +33,7 @@ void setup() {
   // Show current data file stats
 
   // Attempt WiFi connection first and show detailed status
+  // wifi_mgr::begin();
 
   wifi_mgr::begin();
   delay(1000);
@@ -56,6 +58,32 @@ void loop() {
   
   // ble_service::loop();
 
+  // if (wifi_mgr::tick()) {
+  //   delay(20);
+  // }
+  // else {
+  //   Serial.println("WiFi not connected, retrying...");
+  //   delay(5000);  // Retry every 5 seconds if not connected
+  // }
+  Serial.println("starting loop");
+  static reg_buffer::SampleRingBuffer ring;
+  reg_buffer::Sample sample{};
+  mockdata::mockReadIMU(sample.ax, sample.ay, sample.az,
+                        sample.gx, sample.gy, sample.gz);
+  mockdata::mockReadHR(sample.hr_x10);
+  mockdata::mockReadTemp(sample.temp_x100);
+  sample.ts_ms = millis();
+  if (!ring.push(sample)) {
+    Serial.println("Ring buffer overrun");
+  }
+
+  consolidate::ConsolidatedRecord record{};
+  Serial.println("applending record");
+  if (consolidate::consolidate_from_ring(ring, record)) {
+    fs_store::append(record);
+    fs_store::printData();
+  }
+  delay(500);
   if (wifi_mgr::tick()) {
     delay(20);
   }
@@ -86,7 +114,7 @@ void loop() {
 
   // Serial.println();
 
-  delay(1000);
+  // delay(1000);
 }
 
 

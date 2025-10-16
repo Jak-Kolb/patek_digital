@@ -85,15 +85,10 @@ button:hover:not(:disabled) {
   gap: 18px;
 }
 
-.command-buttons {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 12px;
-}
-
-.command-button {
-  flex: 1 1 160px;
-  min-width: 140px;
+.ble-hint {
+  margin: 0;
+  font-size: 0.9rem;
+  color: rgba(255, 255, 255, 0.75);
 }
 
 #ble-disconnect-button {
@@ -181,9 +176,5 @@ button:hover:not(:disabled) {
 
   button {
     width: 100%;
-  }
-
-  .command-buttons {
-    flex-direction: column;
   }
 }

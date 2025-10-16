@@ -2,8 +2,8 @@
 
 #include <cstddef>
 #include <cstdint>
-#include <functional>
-#include <vector>
+
+#include "compute/consolidate.h"
 
 namespace fs_store {
 
@@ -13,9 +13,9 @@ bool begin(bool formatOnFail);
 // Return total bytes stored in the consolidated data file.
 size_t size();
 
-bool append(const int32_t vals[4]); // Append binary data to the consolidated file.
+bool append(const consolidate::ConsolidatedRecord& record);  // Append binary data.
 
-void printData(); // print data stored in filesystem 
+void printData();  // print data stored in filesystem
 
 bool erase(); // Remove the consolidated file.
 
