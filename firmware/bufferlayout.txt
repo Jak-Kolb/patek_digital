@@ -19,3 +19,45 @@ struct SampleRaw {
   uint32_t ts_ms;
 };
 
+// singular sample in memory
+Offset: 0  2  4  6  8  10 12 14 16       20
+Data:   [ax][ay][az][gx][gy][gz][hr][tp][epoch_min]
+Bytes:  E4 01|3C 00|F8 FF|12 00|9A FF|05 00|D0 02|42 0E|2C 8F 01 00
+        ^^^^^ ^^^^^ ^^^^^ ^^^^^ ^^^^^ ^^^^^ ^^^^^ ^^^^^ ^^^^^^^^^^^
+        484   60   -8     18   -102   5    720   3650  102188 min
+
+
+Every 200ms (in main loop):
+├─ Read sensors → Create 20-byte Sample
+├─ Push Sample into gRing
+└─ If gRing.size() >= 60 → Trigger consolidation
+
+
+gRing (circular buffer):
+[S0][S1][S2]...[S58][S59][empty slots...]
+ ^head                ^tail
+ └─ 60 samples × 20 bytes = 1,200 bytes occupied
+
+
+// halfway through consolidation
+ Iteration 30/60:
+├─ hr_sum:   21,600 (8 bytes, growing)
+├─ temp_sum: 109,500 (8 bytes, growing)
+├─ steps:    15 (2 bytes)
+├─ step_high: false (1 byte)
+└─ Local vars: ~24 bytes total
+
+
+// stored in memory
+Offset: 0     2     4     6         10
+Data:   [hr  ][temp][step][epoch_min]
+Bytes:  D0 02|42 0E|0F 00|2C 8F 01 00
+        ^^^^^ ^^^^^ ^^^^^ ^^^^^^^^^^^
+        720   3650  15    102188 min
+
+2,097,152 / 10 bytes = 209,715
+
+if running at 20 Hertz (sampling every 50ms)
+    -3s per record
+    - 209,715 * 3 = 629,145 seconds 
+    - 629,145 / 60 / 60 = 174 hours of sampling can be stored

@@ -163,8 +163,17 @@ async def write_command(client: BleakClient, command: str) -> None:
 
 async def stream_records(client: BleakClient, state: TransferState, sync_time: bool) -> List[dict]:
     state.reset()
+    
+    # Latency tracking
+    transfer_start_time = None
+    first_packet_time = None
+    last_packet_time = None
+    packet_times = []
 
     def handle_notification(_: int, data: bytearray) -> None:
+        nonlocal first_packet_time, last_packet_time
+        packet_recv_time = time.time()
+        
         if not data:
             return
         marker = data[0]
@@ -176,6 +185,11 @@ async def stream_records(client: BleakClient, state: TransferState, sync_time: b
             state.reset(count)
             log(f"Streaming announced: {count} records")
         elif marker == DATA_MARKER:
+            if first_packet_time is None:
+                first_packet_time = packet_recv_time
+            last_packet_time = packet_recv_time
+            packet_times.append(packet_recv_time)
+            
             raw = base64.b64decode(bytes(data[1:]))
             if len(raw) == RECORD_STRUCT.size:
                 state.records.append(raw)
@@ -197,18 +211,54 @@ async def stream_records(client: BleakClient, state: TransferState, sync_time: b
         await write_command(client, f"TIME:{int(time.time())}")
         await asyncio.sleep(0.5)
 
+    transfer_start_time = time.time()
     await write_command(client, "SEND")
 
+    # Adaptive timeout based on expected record count
+    # Base: 10s, add 500ms per record (conservative for adaptive delays)
+    base_timeout = 10.0
+    per_record_timeout = 0.25 # 250ms per record
+    timeout = base_timeout + (per_record_timeout * (state.expected or 20))
+    
     try:
-        await asyncio.wait_for(state.finished.wait(), timeout=30.0)
+        await asyncio.wait_for(state.finished.wait(), timeout=timeout)
     except asyncio.TimeoutError:
-        log("Timed out waiting for transfer to finish")
+        log(f"Timed out after {timeout:.1f}s waiting for transfer to finish")
         state.finished.set()
 
+    transfer_end_time = time.time()
     await client.stop_notify(DATA_CHAR_UUID)
 
     if state.expected is not None and state.records and len(state.records) != state.expected:
         log(f"Warning: expected {state.expected} records, received {len(state.records)}")
+
+    # Calculate and display latency statistics
+    if packet_times and len(packet_times) > 1:
+        total_transfer_time = transfer_end_time - transfer_start_time
+        first_packet_latency = first_packet_time - transfer_start_time if first_packet_time else 0
+        
+        # Calculate inter-packet delays
+        inter_packet_delays = [packet_times[i] - packet_times[i-1] for i in range(1, len(packet_times))]
+        avg_inter_packet = sum(inter_packet_delays) / len(inter_packet_delays) if inter_packet_delays else 0
+        min_inter_packet = min(inter_packet_delays) if inter_packet_delays else 0
+        max_inter_packet = max(inter_packet_delays) if inter_packet_delays else 0
+        
+        throughput_bytes = len(state.records) * 10  # 10 bytes per record
+        throughput_bps = (throughput_bytes * 8) / total_transfer_time if total_transfer_time > 0 else 0
+        
+        print("\n" + "=" * 80)
+        print("BLE TRANSFER LATENCY STATISTICS")
+        print("=" * 80)
+        print(f"Total transfer time:      {total_transfer_time:.3f} seconds")
+        print(f"First packet latency:     {first_packet_latency:.3f} seconds")
+        print(f"Packets received:         {len(packet_times)}")
+        print(f"Avg inter-packet delay:   {avg_inter_packet*1000:.2f} ms")
+        print(f"Min inter-packet delay:   {min_inter_packet*1000:.2f} ms")
+        print(f"Max inter-packet delay:   {max_inter_packet*1000:.2f} ms")
+        print(f"Throughput:               {throughput_bytes/total_transfer_time:.2f} bytes/sec")
+        print(f"                          {throughput_bps:.2f} bits/sec")
+        print(f"Records per second:       {len(packet_times)/total_transfer_time:.2f}")
+        print("=" * 80 + "\n")
 
     decoded_records = [decode_record(raw) for raw in state.records]
     
