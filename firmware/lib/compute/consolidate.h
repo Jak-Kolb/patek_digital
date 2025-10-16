@@ -14,7 +14,7 @@ struct ConsolidatedRecord {
     uint16_t avg_hr_x10;
     int16_t avg_temp_x100;
     uint16_t step_count;
-    uint32_t timestamp_ms;
+    uint32_t epoch_min;
 };
 #pragma pack(pop)
 

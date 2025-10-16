@@ -2,6 +2,7 @@
 
 #include <Arduino.h>
 #include <array>
+#include <ctime>
 #include <limits>
 
 namespace consolidate {
@@ -61,13 +62,34 @@ bool consolidate(const reg_buffer::Sample* samples,
   record_out.avg_hr_x10 = clamp_u16(avg_hr);
   record_out.avg_temp_x100 = clamp_i16(avg_temp);
   record_out.step_count = steps;
-  record_out.timestamp_ms = samples[sample_count - 1].ts_ms;
+  record_out.epoch_min = samples[sample_count - 1].epoch_min;
 
-  Serial.printf("Consolidated window: HR=%.1f bpm, Temp=%.2f C, Steps=%u, ts=%lu\n",
-                record_out.avg_hr_x10 / 10.0f,
-                record_out.avg_temp_x100 / 100.0f,
-                record_out.step_count,
-                static_cast<unsigned long>(record_out.timestamp_ms));
+  const unsigned long epoch_min = static_cast<unsigned long>(record_out.epoch_min);
+  const time_t epoch_sec = static_cast<time_t>(epoch_min) * 60;
+  struct tm tm_buf;
+  char time_buf[24];
+  bool have_time = false;
+  if (epoch_sec > 0) {
+    const struct tm* tm_ptr = gmtime(&epoch_sec);
+    if (tm_ptr != nullptr) {
+      tm_buf = *tm_ptr;
+      have_time = strftime(time_buf, sizeof(time_buf), "%Y-%m-%d %H:%M", &tm_buf) > 0;
+    }
+  }
+
+  if (have_time) {
+    Serial.printf("Consolidated window: HR=%.1f bpm, Temp=%.2f C, Steps=%u, ts=%sZ\n",
+                  record_out.avg_hr_x10 / 10.0f,
+                  record_out.avg_temp_x100 / 100.0f,
+                  record_out.step_count,
+                  time_buf);
+  } else {
+    Serial.printf("Consolidated window: HR=%.1f bpm, Temp=%.2f C, Steps=%u, epoch_min=%lu\n",
+                  record_out.avg_hr_x10 / 10.0f,
+                  record_out.avg_temp_x100 / 100.0f,
+                  record_out.step_count,
+                  epoch_min);
+  }
 
   return true;
 }

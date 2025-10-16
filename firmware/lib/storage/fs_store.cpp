@@ -1,6 +1,7 @@
 #include "fs_store.h"
 #include <Arduino.h>
 #include <LittleFS.h>
+#include <ctime>
 
 #include "app_config.h"
 
@@ -61,14 +62,22 @@ void printData() {
       break;
     }
     size_t abs_addr = PARTITION_BASE_ADDR + offset;
+    const time_t epoch_sec = static_cast<time_t>(record.epoch_min) * 60;
+    const struct tm* tm_ptr = gmtime(&epoch_sec);
+    char time_buf[24] = {0};
+    if (tm_ptr != nullptr) {
+      struct tm tm_copy = *tm_ptr;
+      strftime(time_buf, sizeof(time_buf), "%Y-%m-%d %H:%M", &tm_copy);
+    }
+
     Serial.printf(
-        "fs_store: offset=%6u | addr=0x%06X: HR=%.1f bpm Temp=%.2f C Steps=%u ts=%lu\n",
+        "fs_store: offset=%6u | addr=0x%06X: HR=%.1f bpm Temp=%.2f C Steps=%u ts=%sZ\n",
         (unsigned)offset,
         (unsigned)abs_addr,
         record.avg_hr_x10 / 10.0f,
         record.avg_temp_x100 / 100.0f,
         record.step_count,
-        static_cast<unsigned long>(record.timestamp_ms));
+        time_buf[0] ? time_buf : "(unset)");
   }
   fp.close();
 }
