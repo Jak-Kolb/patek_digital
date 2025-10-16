@@ -45,6 +45,42 @@ bool append(const consolidate::ConsolidatedRecord& record){
   return written == sizeof(record);
 }
 
+size_t record_count() {
+  const size_t bytes = size();
+  if (bytes == 0) {
+    return 0;
+  }
+  return bytes / sizeof(consolidate::ConsolidatedRecord);
+}
+
+bool for_each_record(const std::function<bool(const consolidate::ConsolidatedRecord&, size_t index)>& visitor) {
+  File fp = LittleFS.open(kDataFilePath, "r");
+  if (!fp) {
+    Serial.println("fs_store: Failed to open data file for iteration");
+    return false;
+  }
+
+  size_t index = 0;
+  while (fp.available()) {
+    consolidate::ConsolidatedRecord record{};
+    const size_t read = fp.read(reinterpret_cast<uint8_t*>(&record), sizeof(record));
+    if (read != sizeof(record)) {
+      Serial.println("fs_store: Incomplete data read during iteration");
+      fp.close();
+      return false;
+    }
+
+    if (!visitor(record, index)) {
+      fp.close();
+      return true;
+    }
+    ++index;
+  }
+
+  fp.close();
+  return true;
+}
+
 // print data in filesystem
 void printData() {
   File fp = LittleFS.open(kDataFilePath, "r");

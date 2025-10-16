@@ -2,6 +2,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <functional>
 
 #include "compute/consolidate.h"
 
@@ -14,6 +15,10 @@ bool begin(bool formatOnFail);
 size_t size();
 
 bool append(const consolidate::ConsolidatedRecord& record);  // Append binary data.
+
+size_t record_count();
+
+bool for_each_record(const std::function<bool(const consolidate::ConsolidatedRecord&, size_t index)>& visitor);
 
 void printData();  // print data stored in filesystem
 

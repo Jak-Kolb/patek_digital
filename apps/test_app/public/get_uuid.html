@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Get ESP32 BLE UUID for Python</title>
+    <style>
+        body {
+            font-family: system-ui, -apple-system, sans-serif;
+            max-width: 800px;
+            margin: 50px auto;
+            padding: 20px;
+            background: #0b0c10;
+            color: #f8f8f8;
+        }
+        button {
+            padding: 15px 30px;
+            font-size: 16px;
+            background: linear-gradient(135deg, #45a29e, #66fcf1);
+            color: #0b0c10;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            margin: 10px;
+        }
+        button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(102, 252, 241, 0.3);
+        }
+        #result {
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            padding: 20px;
+            margin: 20px 0;
+            border-radius: 8px;
+            font-family: monospace;
+            white-space: pre-wrap;
+        }
+        .command {
+            background: #1f2833;
+            padding: 15px;
+            border-radius: 5px;
+            margin: 10px 0;
+            border-left: 3px solid #66fcf1;
+        }
+        .success {
+            color: #66fcf1;
+        }
+        .error {
+            color: #f44336;
+        }
+    </style>
+</head>
+<body>
+    <h1>🔍 Get ESP32 BLE UUID for Python</h1>
+    <p>This tool will help you get the macOS BLE UUID that Python/Bleak needs to connect to your ESP32.</p>
+    
+    <button onclick="findESP32()">Find ESP32 UUID</button>
+    
+    <div id="result"></div>
+
+    <script>
+        const SERVICE_UUID = "12345678-1234-5678-1234-56789abc0000";
+        
+        async function findESP32() {
+            const resultDiv = document.getElementById('result');
+            
+            if (!navigator.bluetooth) {
+                resultDiv.innerHTML = '<span class="error">❌ Web Bluetooth not supported. Use Chrome on desktop.</span>';
+                return;
+            }
+            
+            try {
+                resultDiv.innerHTML = '🔍 Scanning for ESP32-DataNode...';
+                
+                const device = await navigator.bluetooth.requestDevice({
+                    filters: [
+                        { namePrefix: "ESP32" },
+                        { name: "ESP32-DataNode" },
+                    ],
+                    optionalServices: [SERVICE_UUID]
+                });
+                
+                // Get device ID
+                const deviceId = device.id;
+                const deviceName = device.name || 'Unknown';
+                
+                // Try to connect to get more info
+                let bleAddress = deviceId;
+                
+                try {
+                    const server = await device.gatt.connect();
+                    console.log('Connected, getting peripheral UUID...');
+                    
+                    // On macOS, we can get the CBPeripheral UUID
+                    if (device.watchAdvertisements) {
+                        // Modern API
+                        await device.watchAdvertisements();
+                    }
+                    
+                    // The device.id should be the UUID we need
+                    bleAddress = deviceId;
+                    
+                    await server.disconnect();
+                } catch (e) {
+                    console.warn('Could not connect:', e);
+                }
+                
+                resultDiv.innerHTML = `
+<span class="success">✓ Found ESP32!</span>
+
+Device Name: ${deviceName}
+Device ID: ${deviceId}
+
+<strong>Use this with Python:</strong>
+
+<div class="command">cd backend
+python src/ble_receiver_v2.py --address "${deviceId}" --erase-after</div>
+
+<strong>Or with original receiver:</strong>
+
+<div class="command">python src/ble_receiver.py --address "${deviceId}" --erase-after</div>
+
+<strong>Save for later:</strong>
+<div class="command">echo "${deviceId}" > backend/.esp32_uuid</div>
+
+Then you can use: python src/ble_receiver_v2.py --address "$(cat .esp32_uuid)" --erase-after
+                `;
+                
+            } catch (error) {
+                resultDiv.innerHTML = `<span class="error">❌ Error: ${error.message}</span>
+                
+Common issues:
+- Make sure ESP32 is powered on and advertising
+- Try resetting the ESP32
+- Check that you selected the correct device in the pairing dialog`;
+            }
+        }
+    </script>
+</body>
+</html>
