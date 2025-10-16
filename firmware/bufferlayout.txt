@@ -1,0 +1,21 @@
+
+64 cycles per buffer
+20 bytes data reads
+
+1280B buffer
+
+2 bytes heart rate
+2 bytes temperature
+6 byte accel
+6 bytes gyro
+4 bytes time stamp
+20 bytes per cycle
+
+struct SampleRaw {
+  int16_t ax, ay, az;
+  int16_t gx, gy, gz;
+  uint16 hr[3];
+  int16_t temp_raw;
+  uint32_t ts_ms;
+};
+
