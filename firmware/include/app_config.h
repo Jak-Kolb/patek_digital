@@ -35,3 +35,28 @@ constexpr char kCmdErase[] = "ERASE";
 constexpr int kBlueLedPin = 2;  // Onboard LED pin for most ESP32 dev boards
 constexpr uint32_t kLedFlashDurationMs = 100;  // LED flash duration for BLE activity
 
+// ===== Subsystem 1 (PCB Hardware Communication) =====
+#define I2C_CLOCK_HZ            400000
+
+// ESP32 DevKit V1 I2C pins
+#define I2C_SDA_PIN             21
+#define I2C_SCL_PIN             22
+
+// 7-bit I2C addresses (adjust if your parts differ)
+#define I2C_ADDR_MAX30102       0x57
+#define I2C_ADDR_BMI270         0x68
+#define I2C_ADDR_MAX30205       0x48
+
+// Sampling cadences (ms)
+#define PPG_INTERVAL_MS         20     // ~50 Hz
+#define IMU_INTERVAL_MS         10     // ~100 Hz
+#define TEMP_INTERVAL_MS        1000   // ~1 Hz
+
+// Optional: integrate with your ring buffer
+// #define SUB1_USE_RINGBUF 1
+
+// ===== Ring buffer config (Subsystem 1 -> Subsystem 2) =====
+#define REG_BUFFER_PAGE_BYTES   256     // fixed page size
+#define REG_BUFFER_SLOTS        32      // total pages in ring (adjust as needed)
+
+
