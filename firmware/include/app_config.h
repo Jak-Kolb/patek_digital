@@ -52,6 +52,19 @@ constexpr uint32_t kLedFlashDurationMs = 100;  // LED flash duration for BLE act
 #define IMU_INTERVAL_MS         10     // ~100 Hz
 #define TEMP_INTERVAL_MS        1000   // ~1 Hz
 
+// Optional GPIO interrupt pins (set to actual pins if wired; leave -1 if not used)
+#ifndef MAX30102_INT_PIN
+#define MAX30102_INT_PIN        -1    // e.g., 19 if MAX30102 INT connected
+#endif
+#ifndef BMI270_INT_PIN
+#define BMI270_INT_PIN          -1    // e.g., 18 if BMI270 INT1/INT2 connected
+#endif
+
+// Optional light sleep between interrupts (requires proper wake-capable pins and wiring)
+#ifndef ENABLE_LIGHT_SLEEP
+#define ENABLE_LIGHT_SLEEP      0
+#endif
+
 // Optional: integrate with your ring buffer
 // #define SUB1_USE_RINGBUF 1
 
