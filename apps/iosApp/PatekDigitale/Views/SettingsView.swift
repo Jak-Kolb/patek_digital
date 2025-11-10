@@ -247,46 +247,6 @@ struct SettingsView: View {
 
 // MARK: - Supporting Views
 
-// Visual signal strength indicator (bars)
-struct SignalStrengthView: View {
-    let rssi: Int
-    
-    // Convert RSSI to 0-4 bar scale
-    private var barCount: Int {
-        switch rssi {
-        case -50...0: return 4    // Excellent
-        case -60..<(-50): return 3 // Good
-        case -70..<(-60): return 2 // Fair
-        case -80..<(-70): return 1 // Poor
-        default: return 0          // Very poor
-        }
-    }
-    
-    var body: some View {
-        HStack(spacing: 2) {
-            ForEach(0..<4) { index in
-                RoundedRectangle(cornerRadius: 2)
-                    .fill(index < barCount ? Color.green : Color.gray.opacity(0.3))
-                    .frame(width: 4, height: CGFloat(4 + index * 3))
-            }
-        }
-    }
-}
-
-// Quality indicator with color-coded icon
-struct QualityIndicator: View {
-    let flags: QualityFlags
-    
-    var body: some View {
-        HStack {
-            Image(systemName: flags.isReliable ? "checkmark.circle.fill" : "exclamationmark.triangle.fill")
-                .foregroundColor(flags.isReliable ? .green : .orange)
-            Text(flags.isReliable ? "Good" : "Issues")
-                .foregroundColor(.secondary)
-        }
-    }
-}
-
 // Preview for SwiftUI canvas
 struct SettingsView_Previews: PreviewProvider {
     static var previews: some View {
