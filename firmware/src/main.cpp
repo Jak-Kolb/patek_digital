@@ -76,10 +76,10 @@ void setup() {
 
   // NimBLEDevice::setMTU(185);
   bleServer.begin();
-  bleServer.set_erase_callback(handle_ble_erase);
-  bleServer.set_time_sync_callback(handle_ble_time_sync);
-  bleServer.set_transfer_start_callback(handle_transfer_start);
-  bleServer.set_transfer_complete_callback(handle_transfer_complete);
+  bleServer.onErase = handle_ble_erase;
+  bleServer.onTimeSync = handle_ble_time_sync;
+  bleServer.onTransferStart = handle_transfer_start;
+  bleServer.onTransferComplete = handle_transfer_complete;
   Serial.println("[MAIN] BLE server initialized");
 
 }
@@ -148,6 +148,7 @@ void loop() {
       Serial.println("[STORE] Failed to append record");
     }
   }
+  bleServer.update();
   delay(25);
 
   // working data generation and storage basic
