@@ -45,42 +45,6 @@ bool append(const consolidate::ConsolidatedRecord& record){
   return written == sizeof(record);
 }
 
-size_t record_count() {
-  const size_t bytes = size();
-  if (bytes == 0) {
-    return 0;
-  }
-  return bytes / sizeof(consolidate::ConsolidatedRecord);
-}
-
-bool for_each_record(const std::function<bool(const consolidate::ConsolidatedRecord&, size_t index)>& visitor) {
-  File fp = LittleFS.open(kDataFilePath, "r");
-  if (!fp) {
-    Serial.println("fs_store: Failed to open data file for iteration");
-    return false;
-  }
-
-  size_t index = 0;
-  while (fp.available()) {
-    consolidate::ConsolidatedRecord record{};
-    const size_t read = fp.read(reinterpret_cast<uint8_t*>(&record), sizeof(record));
-    if (read != sizeof(record)) {
-      Serial.println("fs_store: Incomplete data read during iteration");
-      fp.close();
-      return false;
-    }
-
-    if (!visitor(record, index)) {
-      fp.close();
-      return true;
-    }
-    ++index;
-  }
-
-  fp.close();
-  return true;
-}
-
 // print data in filesystem
 void printData() {
   File fp = LittleFS.open(kDataFilePath, "r");
@@ -141,7 +105,43 @@ bool erase() {
     return LittleFS.remove(kDataFilePath);
   }
   return true; // File doesn't exist, consider it "erased"
-
 } 
+
+size_t record_count() {
+  const size_t file_size = size();
+  return file_size / sizeof(consolidate::ConsolidatedRecord);
+}
+
+void for_each_record(const std::function<bool(const consolidate::ConsolidatedRecord&, size_t)>& callback) {
+  if (!callback) {
+    return;
+  }
+
+  File fp = LittleFS.open(kDataFilePath, "r");
+  if (!fp) {
+    Serial.println("[FS_STORE] Failed to open data file for iteration");
+    return;
+  }
+
+  size_t index = 0;
+  while (fp.available()) {
+    consolidate::ConsolidatedRecord record{};
+    size_t read_bytes = fp.read(reinterpret_cast<uint8_t*>(&record), sizeof(record));
+    
+    if (read_bytes != sizeof(record)) {
+      Serial.printf("[FS_STORE] Incomplete record at index %u\n", static_cast<unsigned>(index));
+      break;
+    }
+
+    // Call the callback with the record and index
+    if (!callback(record, index)) {
+      break;  // Callback returned false, stop iteration
+    }
+    
+    index++;
+  }
+
+  fp.close();
+}
 
 }  // namespace fs_store

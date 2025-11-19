@@ -14,11 +14,13 @@ bool begin(bool formatOnFail);
 // Return total bytes stored in the consolidated data file.
 size_t size();
 
-bool append(const consolidate::ConsolidatedRecord& record);  // Append binary data.
-
+// Return number of consolidated records in storage.
 size_t record_count();
 
-bool for_each_record(const std::function<bool(const consolidate::ConsolidatedRecord&, size_t index)>& visitor);
+bool append(const consolidate::ConsolidatedRecord& record);  // Append binary data.
+
+// Iterate through all records with a callback.
+void for_each_record(const std::function<bool(const consolidate::ConsolidatedRecord&, size_t)>& callback);
 
 void printData();  // print data stored in filesystem
 

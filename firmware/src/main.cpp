@@ -148,7 +148,7 @@ void loop() {
       Serial.println("[STORE] Failed to append record");
     }
   }
-  delay(200);
+  delay(25);
 
   // working data generation and storage basic
   /*

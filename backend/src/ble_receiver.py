@@ -184,24 +184,33 @@ async def stream_records(client: BleakClient, state: TransferState, sync_time: b
                 count = 0
             state.reset(count)
             log(f"Streaming announced: {count} records")
+
         elif marker == DATA_MARKER:
             if first_packet_time is None:
                 first_packet_time = packet_recv_time
             last_packet_time = packet_recv_time
             packet_times.append(packet_recv_time)
-            
+
+            # Still decoding base64 from ESP32; keep this unless you switch to raw
             raw = base64.b64decode(bytes(data[1:]))
             if len(raw) == RECORD_STRUCT.size:
                 state.records.append(raw)
                 log(f"Received record #{len(state.records)}")
+
+                if state.expected is not None and state.expected > 0 and len(state.records) >= state.expected:
+                    log("Reached expected record count; finishing")
+                    state.finished.set()
             else:
                 log(f"Skipping malformed record length {len(raw)}")
+
         elif marker == END_MARKER:
             log("End marker received")
             state.finished.set()
+
         elif marker == ACK_MARKER:
             state.last_ack = data[1:].decode("ascii", errors="ignore")
             log(f"ACK: {state.last_ack}")
+
         else:
             log(f"Unhandled packet: {data!r}")
 
@@ -214,10 +223,9 @@ async def stream_records(client: BleakClient, state: TransferState, sync_time: b
     transfer_start_time = time.time()
     await write_command(client, "SEND")
 
-    # Adaptive timeout based on expected record count
-    # Base: 10s, add 500ms per record (conservative for adaptive delays)
+    # Adaptive timeout: base 10s + 250ms/record
     base_timeout = 10.0
-    per_record_timeout = 0.25 # 250ms per record
+    per_record_timeout = 0.25
     timeout = base_timeout + (per_record_timeout * (state.expected or 20))
     
     try:
@@ -232,20 +240,19 @@ async def stream_records(client: BleakClient, state: TransferState, sync_time: b
     if state.expected is not None and state.records and len(state.records) != state.expected:
         log(f"Warning: expected {state.expected} records, received {len(state.records)}")
 
-    # Calculate and display latency statistics
+    # Latency / throughput stats (🔧 use 12 bytes/record)
     if packet_times and len(packet_times) > 1:
         total_transfer_time = transfer_end_time - transfer_start_time
         first_packet_latency = first_packet_time - transfer_start_time if first_packet_time else 0
-        
-        # Calculate inter-packet delays
         inter_packet_delays = [packet_times[i] - packet_times[i-1] for i in range(1, len(packet_times))]
         avg_inter_packet = sum(inter_packet_delays) / len(inter_packet_delays) if inter_packet_delays else 0
         min_inter_packet = min(inter_packet_delays) if inter_packet_delays else 0
         max_inter_packet = max(inter_packet_delays) if inter_packet_delays else 0
-        
-        throughput_bytes = len(state.records) * 10  # 10 bytes per record
+
+        # 🔧 Corrected: 12 bytes per record (your struct is <HhHI)
+        throughput_bytes = len(state.records) * RECORD_STRUCT.size
         throughput_bps = (throughput_bytes * 8) / total_transfer_time if total_transfer_time > 0 else 0
-        
+
         print("\n" + "=" * 80)
         print("BLE TRANSFER LATENCY STATISTICS")
         print("=" * 80)
@@ -261,8 +268,7 @@ async def stream_records(client: BleakClient, state: TransferState, sync_time: b
         print("=" * 80 + "\n")
 
     decoded_records = [decode_record(raw) for raw in state.records]
-    
-    # Print all records to terminal
+    # ... (rest of your function unchanged)
     if decoded_records:
         print("\n" + "=" * 80)
         print(f"RECEIVED {len(decoded_records)} RECORDS FROM ESP32")
@@ -280,8 +286,10 @@ async def stream_records(client: BleakClient, state: TransferState, sync_time: b
             
             print(f"Record {i:2d}: HR={hr:5.1f} bpm | Temp={temp:5.2f}°C | Steps={steps:4d} | Time={time_str}")
         print("=" * 80 + "\n")
-    
+        
     return decoded_records
+
+
 
 
 def calculate_calories_burned(steps: int, weight_lbs: float, height_inches: float) -> float:
