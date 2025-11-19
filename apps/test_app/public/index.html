@@ -27,7 +27,13 @@
       </div>
       <p id="ble-status" class="status">Not connected.</p>
       <div id="ble-controls" class="ble-controls hidden" aria-live="polite">
-        <p class="ble-hint">When connected, notifications from the ESP32 appear below as raw bytes and decoded values.</p>
+        <p class="ble-hint">Connected! Use the buttons below to interact with the ESP32.</p>
+        <div class="command-buttons">
+          <button id="ble-sync-time" type="button">Sync Time</button>
+          <button id="ble-list" type="button">List Records</button>
+          <button id="ble-send" type="button">Download Data</button>
+          <button id="ble-erase" type="button" class="danger">Erase Storage</button>
+        </div>
         <div class="response-panel">
           <h3>Device Notifications</h3>
           <pre id="ble-response-log" class="response-log" tabindex="0"></pre>

@@ -1,38 +1,29 @@
 #include "consolidate.h"
-
 #include <Arduino.h>
 #include <array>
-#include <limits>
+#include <ctime>
+#include <algorithm>
 
 namespace consolidate {
 
-constexpr int32_t kStepOnThresholdSq = 600 * 600;   // horizontal accel spike
-constexpr int32_t kStepOffThresholdSq = 400 * 400;
+namespace {
+  constexpr int32_t kStepOnThresholdSq = 600 * 600;   // Horizontal accel spike
+  constexpr int32_t kStepOffThresholdSq = 400 * 400;
 
-uint16_t clamp_u16(uint32_t value) {
-  return value > static_cast<uint32_t>(std::numeric_limits<uint16_t>::max())
-             ? std::numeric_limits<uint16_t>::max()
-             : static_cast<uint16_t>(value);
-}
-
-int16_t clamp_i16(int32_t value) {
-  if (value > static_cast<int32_t>(std::numeric_limits<int16_t>::max())) {
-    return std::numeric_limits<int16_t>::max();
+  template<typename T>
+  T clamp(T value, T min_val, T max_val) {
+    return std::max(min_val, std::min(value, max_val));
   }
-  if (value < static_cast<int32_t>(std::numeric_limits<int16_t>::min())) {
-    return std::numeric_limits<int16_t>::min();
-  }
-  return static_cast<int16_t>(value);
 }
-
 
 bool consolidate(const reg_buffer::Sample* samples,
                  size_t sample_count,
                  ConsolidatedRecord& record_out) {
-  if (samples == nullptr || sample_count == 0) {
+  if (!samples || sample_count == 0) {
     return false;
   }
 
+  // Accumulate sensor data
   uint64_t hr_sum = 0;
   int64_t temp_sum = 0;
   uint16_t steps = 0;
@@ -43,31 +34,42 @@ bool consolidate(const reg_buffer::Sample* samples,
     hr_sum += s.hr_x10;
     temp_sum += s.temp_x100;
 
-    const int32_t ax = static_cast<int32_t>(s.ax);
-    const int32_t ay = static_cast<int32_t>(s.ay);
-    const int32_t horizontal_mag_sq = ax * ax + ay * ay;
+    // Step detection using horizontal acceleration magnitude
+    const int32_t horizontal_mag_sq = 
+        static_cast<int32_t>(s.ax) * s.ax + static_cast<int32_t>(s.ay) * s.ay;
 
     if (!step_high && horizontal_mag_sq >= kStepOnThresholdSq) {
-      ++steps;
+      steps++;
       step_high = true;
     } else if (step_high && horizontal_mag_sq <= kStepOffThresholdSq) {
       step_high = false;
     }
   }
 
-  const uint32_t avg_hr = static_cast<uint32_t>(hr_sum / sample_count);
-  const int32_t avg_temp = static_cast<int32_t>(temp_sum / static_cast<int64_t>(sample_count));
-
-  record_out.avg_hr_x10 = clamp_u16(avg_hr);
-  record_out.avg_temp_x100 = clamp_i16(avg_temp);
+  // Calculate averages and build record
+  record_out.avg_hr_x10 = static_cast<uint16_t>(
+      clamp<uint64_t>(hr_sum / sample_count, 0, UINT16_MAX));
+  record_out.avg_temp_x100 = static_cast<int16_t>(
+      clamp<int64_t>(temp_sum / sample_count, INT16_MIN, INT16_MAX));
   record_out.step_count = steps;
-  record_out.timestamp_ms = samples[sample_count - 1].ts_ms;
+  record_out.epoch_min = samples[sample_count - 1].epoch_min;
 
-  Serial.printf("Consolidated window: HR=%.1f bpm, Temp=%.2f C, Steps=%u, ts=%lu\n",
+  // Debug output with timestamp if available
+  char time_buf[24] = "";
+  const time_t epoch_sec = static_cast<time_t>(record_out.epoch_min) * 60;
+  if (epoch_sec > 0) {
+    struct tm* tm_ptr = gmtime(&epoch_sec);
+    if (tm_ptr) {
+      strftime(time_buf, sizeof(time_buf), "%Y-%m-%d %H:%MZ", tm_ptr);
+    }
+  }
+
+  Serial.printf("Consolidated: HR=%.1f bpm, Temp=%.2f°C, Steps=%u%s%s\n",
                 record_out.avg_hr_x10 / 10.0f,
                 record_out.avg_temp_x100 / 100.0f,
                 record_out.step_count,
-                static_cast<unsigned long>(record_out.timestamp_ms));
+                time_buf[0] ? ", ts=" : ", epoch_min=",
+                time_buf[0] ? time_buf : String(record_out.epoch_min).c_str());
 
   return true;
 }

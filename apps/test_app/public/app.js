@@ -6,8 +6,12 @@ const bleDisconnectButton = document.getElementById("ble-disconnect-button");
 const bleStatus = document.getElementById("ble-status");
 const bleControls = document.getElementById("ble-controls");
 const responseLog = document.getElementById("ble-response-log");
-const BLE_SERVICE_UUID = "4fafc201-1fb5-459e-8fcc-c5c9c331914b";
-const BLE_CHARACTERISTIC_UUID = "beb5483e-36e1-4688-b7f5-ea07361b26a8";
+// Updated to match firmware UUIDs in app_config.h
+const BLE_SERVICE_UUID = "12345678-1234-5678-1234-56789abc0000";
+const BLE_DATA_CHAR_UUID = "12345678-1234-5678-1234-56789abc1001";
+const BLE_CONTROL_CHAR_UUID = "12345678-1234-5678-1234-56789abc1002";
+// Use data characteristic for notifications
+const BLE_CHARACTERISTIC_UUID = BLE_DATA_CHAR_UUID;
 
 function canonicalUuid(uuidLike) {
   if (!uuidLike) {
@@ -31,6 +35,7 @@ const bleSession = {
   server: null,
   service: null,
   dataCharacteristic: null,
+  controlCharacteristic: null,
 };
 
 const responseHistory = [];
@@ -158,6 +163,7 @@ function resetBleSession(message) {
   bleSession.server = null;
   bleSession.service = null;
   bleSession.dataCharacteristic = null;
+  bleSession.controlCharacteristic = null;
 
   showBleControls(false);
 
@@ -246,7 +252,7 @@ async function connectBle() {
     const device = await navigator.bluetooth.requestDevice({
       filters: [
         { namePrefix: "ESP32" },
-        { name: "ESP32_NimBLE_Server" },
+        { name: "ESP32-DataNode" },
         { services: [primaryUuid] },
       ],
       optionalServices: ["battery_service", primaryUuid],
@@ -274,7 +280,11 @@ async function connectBle() {
     }
 
     const dataCharacteristic = await service.getCharacteristic(
-      canonicalUuid(BLE_CHARACTERISTIC_UUID)
+      canonicalUuid(BLE_DATA_CHAR_UUID)
+    );
+
+    const controlCharacteristic = await service.getCharacteristic(
+      canonicalUuid(BLE_CONTROL_CHAR_UUID)
     );
 
     await dataCharacteristic.startNotifications();
@@ -287,6 +297,7 @@ async function connectBle() {
     bleSession.server = server;
     bleSession.service = service;
     bleSession.dataCharacteristic = dataCharacteristic;
+    bleSession.controlCharacteristic = controlCharacteristic;
 
     showBleControls(true);
     bleStatus.textContent = `Connected to ${device.name || device.id}`;
@@ -318,9 +329,56 @@ async function disconnectBle() {
     bleDisconnectButton.disabled = false;
   }
 }
+
+async function sendBleCommand(command) {
+  if (!bleSession.controlCharacteristic) {
+    appendResponse("error", "Not connected to ESP32");
+    return;
+  }
+
+  try {
+    const encoder = new TextEncoder();
+    const data = encoder.encode(command);
+    await bleSession.controlCharacteristic.writeValue(data);
+    appendResponse("send", `Command: ${command}`);
+  } catch (error) {
+    appendResponse("error", `Failed to send command: ${error.message}`);
+  }
+}
+
+async function sendListCommand() {
+  await sendBleCommand("LIST");
+}
+
+async function sendSendCommand() {
+  appendResponse("info", "Requesting data transfer from ESP32...");
+  await sendBleCommand("SEND");
+}
+
+async function sendEraseCommand() {
+  if (!confirm("Are you sure you want to erase all data on the ESP32?")) {
+    return;
+  }
+  appendResponse("info", "Sending ERASE command...");
+  await sendBleCommand("ERASE");
+}
+
+async function syncTime() {
+  const epochSeconds = Math.floor(Date.now() / 1000);
+  await sendBleCommand(`TIME:${epochSeconds}`);
+}
+
 scanButton.addEventListener("click", scanNetwork);
 bleConnectButton.addEventListener("click", connectBle);
 bleDisconnectButton.addEventListener("click", disconnectBle);
+
+// Add event listeners for BLE command buttons
+document.getElementById("ble-sync-time")?.addEventListener("click", syncTime);
+document.getElementById("ble-list")?.addEventListener("click", sendListCommand);
+document.getElementById("ble-send")?.addEventListener("click", sendSendCommand);
+document
+  .getElementById("ble-erase")
+  ?.addEventListener("click", sendEraseCommand);
 
 document.addEventListener("DOMContentLoaded", () => {
   networkStatus.textContent =

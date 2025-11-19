@@ -17,7 +17,7 @@ struct Sample {
     int16_t gz;
     uint16_t hr_x10;
     int16_t temp_x100;
-    uint32_t ts_ms;
+    uint32_t epoch_min;
 };
 #pragma pack(pop)
 

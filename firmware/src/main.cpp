@@ -1,6 +1,8 @@
 #include <Arduino.h>
+#include <ctime>
 #include <string>
 #include <vector>
+#include <sys/time.h>
 
 #include "app_config.h"
 #include "wifi/wifi_mgr.h"
@@ -10,7 +12,47 @@
 #include "compute/mockdata.h"
 #include "ble/ble_service.h"
 
-uint8_t buffer[256];
+namespace {
+
+volatile uint32_t gFallbackBaseMillis = 0;
+volatile bool gResetRingRequested = false;
+reg_buffer::SampleRingBuffer gRing;
+
+void reset_fallback_clock() {
+  gFallbackBaseMillis = millis();
+}
+
+void handle_ble_erase() {
+  Serial.println("[BLE] Erase command received");
+  if (fs_store::erase()) {
+    Serial.println("[BLE] Filesystem data cleared");
+  } else {
+    Serial.println("[BLE] Filesystem erase failed");
+  }
+  reset_fallback_clock();
+  gResetRingRequested = true;
+}
+
+void handle_ble_time_sync(time_t epoch) {
+  Serial.printf("[BLE] Time sync epoch=%lld\n", static_cast<long long>(epoch));
+  struct timeval tv;
+  tv.tv_sec = epoch;
+  tv.tv_usec = 0;
+  settimeofday(&tv, nullptr);
+  reset_fallback_clock();
+}
+
+void handle_transfer_start() {
+  Serial.println("[BLE] Transfer starting");
+}
+
+void handle_transfer_complete() {
+  Serial.println("[BLE] Transfer complete");
+}
+
+}  // namespace
+
+// uint8_t buffer[256];
 
 
 void setup() {
@@ -30,22 +72,15 @@ void setup() {
     Serial.println("[MAIN] Filesystem initialized successfully.");
   }
 
-  // Show current data file stats
+  reset_fallback_clock();
 
-  // Attempt WiFi connection first and show detailed status
-  // wifi_mgr::begin();
-
-  wifi_mgr::begin();
-  delay(1000);
-
+  // NimBLEDevice::setMTU(185);
   bleServer.begin();
-  Serial.println("BLE server started.");
-  // reg_buffer::generate_random_256_bytes(buffer, 256);
-  // Serial.println("Generated 256 bytes of random data:");
-  // for (size_t i = 0; i < 256; ++i) {
-  //   Serial.printf("%d ", buffer[i]);
-  // }
-  // Serial.println();
+  bleServer.onErase = handle_ble_erase;
+  bleServer.onTimeSync = handle_ble_time_sync;
+  bleServer.onTransferStart = handle_transfer_start;
+  bleServer.onTransferComplete = handle_transfer_complete;
+  Serial.println("[MAIN] BLE server initialized");
 
 }
 
@@ -56,15 +91,65 @@ void loop() {
   //   // process_register_buffer();
   // }
   
-  ble_service::loop();
 
-  if (wifi_mgr::tick()) {
-    delay(20);
+  // ble_service::loop();
+
+  // if (wifi_mgr::tick()) {
+  //   delay(20);
+  // }
+  // else {
+  //   Serial.println("WiFi not connected, retrying...");
+  //   delay(5000);  // Retry every 5 seconds if not connected
+  // }
+
+
+  if (gResetRingRequested) {
+    gRing.clear();
+    gResetRingRequested = false;
   }
-  else {
-    Serial.println("WiFi not connected, retrying...");
-    delay(5000);  // Retry every 5 seconds if not connected
+
+  reg_buffer::Sample sample{}; // initialize cycle reading struct
+
+
+  mockdata::mockReadIMU(sample.ax, sample.ay, sample.az,
+                        sample.gx, sample.gy, sample.gz);
+  mockdata::mockReadHR(sample.hr_x10); // generating mock data
+  mockdata::mockReadTemp(sample.temp_x100);
+
+
+  const time_t now = time(nullptr);
+
+  if (now > 0) {
+    sample.epoch_min = static_cast<uint32_t>(now / 60);
+  } else {
+    const uint32_t base = gFallbackBaseMillis;
+    const uint32_t elapsed_ms = millis() - base;
+    sample.epoch_min = static_cast<uint32_t>(elapsed_ms / 60000UL);
   }
+  
+  // Serial.printf("Sample: epoch_min=%lu ax=%d ay=%d az=%d gx=%d gy=%d gz=%d hr_x10=%u temp_x100=%d\n",
+  //               static_cast<unsigned long>(sample.epoch_min),
+  //               sample.ax, sample.ay, sample.az,
+  //               sample.gx, sample.gy, sample.gz,
+  //               sample.hr_x10, sample.temp_x100);
+
+  if (!gRing.push(sample)) {
+    Serial.println("Ring buffer overrun");
+  } else {
+    // Serial.printf("Ring buffer size: %u\n", static_cast<unsigned>(gRing.size()));
+  }
+
+  consolidate::ConsolidatedRecord record{};
+  if (consolidate::consolidate_from_ring(gRing, record)) {
+    if (fs_store::append(record)) {
+      Serial.println("[STORE] Consolidated record appended");
+      fs_store::printData();
+    } else {
+      Serial.println("[STORE] Failed to append record");
+    }
+  }
+  bleServer.update();
+  delay(25);
 
   // working data generation and storage basic
   /*
@@ -84,7 +169,7 @@ void loop() {
 
   // Serial.println();
 
-  delay(1000);
+  // delay(1000);
 }
 
 

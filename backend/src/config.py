@@ -1,7 +1,10 @@
 import os
+from pathlib import Path
 from dotenv import load_dotenv
 
-load_dotenv(dotenv_path="../.env")
+# Load .env from backend directory (parent of src/)
+env_path = Path(__file__).parent.parent / ".env"
+load_dotenv(dotenv_path=env_path)
 
 # Supabase configuration
 SUPABASE_URL = os.getenv("SUPABASE_URL")

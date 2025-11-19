@@ -1,44 +1,41 @@
-
 #ifndef BLE_SERVER_H
 #define BLE_SERVER_H
 
 #include <NimBLEDevice.h>
 #include <Arduino.h>
-#include <cstdint>
+#include <functional>
 
-class BLEServerClass {
+namespace consolidate { struct ConsolidatedRecord; }
+
+// Inherit directly from callbacks to simplify structure
+class BLEServerClass : public NimBLEServerCallbacks, public NimBLECharacteristicCallbacks {
 public:
-  void begin();
-  void transfer(uint8_t data[4]);
+    void begin();
+    void update(); // Call this in loop()
+
+    // Public callbacks (assign these directly)
+    std::function<void()> onErase;
+    std::function<void(time_t)> onTimeSync;
+    std::function<void()> onTransferStart;
+    std::function<void()> onTransferComplete;
 
 private:
-  NimBLEServer* pServer = nullptr;
-  NimBLECharacteristic* pCharacteristic = nullptr;
-  bool deviceConnected = false;
+    volatile bool _sendRequested = false;
+    bool deviceConnected = false;
+    NimBLECharacteristic* pNotifyCharacteristic = nullptr;
 
-  class ServerCallbacks : public NimBLEServerCallbacks {
-  public:
-    ServerCallbacks(BLEServerClass* parent) : pParent(parent) {}
+    // Overrides from NimBLEServerCallbacks
+    void onConnect(NimBLEServer* pServer) override;
+    void onDisconnect(NimBLEServer* pServer) override;
 
-    void onConnect(NimBLEServer* pServer) override {
-      pParent->deviceConnected = true;
-      Serial.println("BLE device connected.");
-    }
+    // Overrides from NimBLECharacteristicCallbacks
+    void onWrite(NimBLECharacteristic* characteristic) override;
 
-    void onDisconnect(NimBLEServer* pServer) override {
-      pParent->deviceConnected = false;
-      Serial.println("BLE device disconnected.");
-    }
-
-  private:
-    BLEServerClass* pParent;
-  };
-
-  ServerCallbacks serverCallbacks{this};
+    // Helpers
+    void stream_all_records();
+    bool notify(const uint8_t* data, size_t length);
 };
 
 extern BLEServerClass bleServer;
 
 #endif
-
-
