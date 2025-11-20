@@ -75,34 +75,53 @@ static ImuSample bmi270_read() {
   return s;
 }
 
-// --- MAX30102 (simplified: configure once, read FIFO latest sample) ---
+// --- MAX30102 (configure, drain FIFO like sensors_demo) ---
+static constexpr uint8_t MAX30102_REG_INT_STATUS_1 = 0x00;
+static constexpr uint8_t MAX30102_REG_INT_STATUS_2 = 0x01;
+static constexpr uint8_t MAX30102_REG_INT_ENABLE_1 = 0x02;
+static constexpr uint8_t MAX30102_REG_INT_ENABLE_2 = 0x03;
+static constexpr uint8_t MAX30102_REG_FIFO_WR_PTR  = 0x04;
+static constexpr uint8_t MAX30102_REG_OVF_COUNTER  = 0x05;
+static constexpr uint8_t MAX30102_REG_FIFO_RD_PTR  = 0x06;
+static constexpr uint8_t MAX30102_REG_FIFO_DATA    = 0x07;
+static constexpr uint8_t MAX30102_REG_FIFO_CONFIG  = 0x08;
+static constexpr uint8_t MAX30102_REG_MODE_CONFIG  = 0x09;
+static constexpr uint8_t MAX30102_REG_SPO2_CONFIG  = 0x0A;
+static constexpr uint8_t MAX30102_REG_LED1_PA      = 0x0C;
+static constexpr uint8_t MAX30102_REG_LED2_PA      = 0x0D;
+static constexpr uint8_t MAX30102_REG_PART_ID      = 0xFF;
+
 static bool max30102_begin() {
   if (!i2c_ping(MAX30102_ADDR)) { Serial.println("MAX30102: not found"); return false; }
-  int part = i2c_read8(MAX30102_ADDR, 0xFF);
-  if (part != 0x15) { Serial.printf("MAX30102: PART_ID=0x%02X (expect 0x15)\n", part); return false; }
-  // Reset
-  (void)i2c_write8(MAX30102_ADDR, 0x09, 0x40);
+  int part = i2c_read8(MAX30102_ADDR, MAX30102_REG_PART_ID);
+  if (part != 0x15) { Serial.printf("MAX30102: unexpected PART_ID=0x%02X\n", part); return false; }
+  Serial.printf("MAX30102: found PART_ID=0x%02X\n", part);
+  // Reset & wait
+  (void)i2c_write8(MAX30102_ADDR, MAX30102_REG_MODE_CONFIG, 0x40);
   uint32_t t0 = millis();
   while (millis() - t0 < 200) {
-    int m = i2c_read8(MAX30102_ADDR, 0x09);
+    int m = i2c_read8(MAX30102_ADDR, MAX30102_REG_MODE_CONFIG);
     if (m >= 0 && (m & 0x40) == 0) break;
     delay(2);
   }
   // Clear status
-  (void)i2c_read8(MAX30102_ADDR, 0x00); (void)i2c_read8(MAX30102_ADDR, 0x01);
-  // FIFO pointers
-  (void)i2c_write8(MAX30102_ADDR, 0x04, 0x00);
-  (void)i2c_write8(MAX30102_ADDR, 0x05, 0x00);
-  (void)i2c_write8(MAX30102_ADDR, 0x06, 0x00);
-  // FIFO config avg=4 rollover enable threshold 0x0F
-  (void)i2c_write8(MAX30102_ADDR, 0x08, 0b01010000 | 0x0F);
+  (void)i2c_read8(MAX30102_ADDR, MAX30102_REG_INT_STATUS_1);
+  (void)i2c_read8(MAX30102_ADDR, MAX30102_REG_INT_STATUS_2);
+  // Reset FIFO pointers
+  (void)i2c_write8(MAX30102_ADDR, MAX30102_REG_FIFO_WR_PTR, 0x00);
+  (void)i2c_write8(MAX30102_ADDR, MAX30102_REG_OVF_COUNTER, 0x00);
+  (void)i2c_write8(MAX30102_ADDR, MAX30102_REG_FIFO_RD_PTR, 0x00);
+  // FIFO config: avg=4, rollover enable, threshold 0x0F
+  (void)i2c_write8(MAX30102_ADDR, MAX30102_REG_FIFO_CONFIG, 0b01010000 | 0x0F);
   // SpO2 config: ADC range 4096nA, ~100Hz sample rate, pulse width 411us
-  (void)i2c_write8(MAX30102_ADDR, 0x0A, 0b11001111);
-  // LED currents reduced a bit for power margin
-  (void)i2c_write8(MAX30102_ADDR, 0x0C, 0x20);
-  (void)i2c_write8(MAX30102_ADDR, 0x0D, 0x20);
-  // Mode: SpO2
-  (void)i2c_write8(MAX30102_ADDR, 0x09, 0x03);
+  (void)i2c_write8(MAX30102_ADDR, MAX30102_REG_SPO2_CONFIG, 0b11001111);
+  // LED currents (slightly higher for better SNR)
+  (void)i2c_write8(MAX30102_ADDR, MAX30102_REG_LED1_PA, 0x28);
+  (void)i2c_write8(MAX30102_ADDR, MAX30102_REG_LED2_PA, 0x28);
+  // Enable PPG ready interrupt (not strictly used but set for completeness)
+  (void)i2c_write8(MAX30102_ADDR, MAX30102_REG_INT_ENABLE_1, 0x40);
+  // Mode: SpO2 (RED+IR)
+  (void)i2c_write8(MAX30102_ADDR, MAX30102_REG_MODE_CONFIG, 0x03);
   delay(50);
   Serial.println("MAX30102 ready");
   return true;
@@ -110,16 +129,19 @@ static bool max30102_begin() {
 struct PpgSample { uint32_t red; uint32_t ir; bool ok; };
 static PpgSample max30102_readOne() {
   PpgSample s{0,0,false};
-  int wr = i2c_read8(MAX30102_ADDR, 0x04);
-  int rd = i2c_read8(MAX30102_ADDR, 0x06);
+  int wr = i2c_read8(MAX30102_ADDR, MAX30102_REG_FIFO_WR_PTR);
+  int rd = i2c_read8(MAX30102_ADDR, MAX30102_REG_FIFO_RD_PTR);
   if (wr < 0 || rd < 0) return s;
   uint8_t available = (uint8_t)((wr - rd) & 0x1F);
   if (!available) return s;
-  uint8_t data[6];
-  if (i2c_readN(MAX30102_ADDR, 0x07, data, 6) != 6) return s;
-  s.red = ((uint32_t)(data[0] & 0x03) << 16) | ((uint32_t)data[1] << 8) | data[2];
-  s.ir  = ((uint32_t)(data[3] & 0x03) << 16) | ((uint32_t)data[4] << 8) | data[5];
-  s.ok = true;
+  if (available > 32) available = 32; // safety cap
+  for (uint8_t i = 0; i < available; ++i) {
+    uint8_t data[6];
+    if (i2c_readN(MAX30102_ADDR, MAX30102_REG_FIFO_DATA, data, 6) != 6) { s.ok = false; return s; }
+    uint32_t red = ((uint32_t)(data[0] & 0x03) << 16) | ((uint32_t)data[1] << 8) | data[2];
+    uint32_t ir  = ((uint32_t)(data[3] & 0x03) << 16) | ((uint32_t)data[4] << 8) | data[5];
+    s.red = red; s.ir = ir; s.ok = true; // keep last
+  }
   return s;
 }
 
@@ -163,53 +185,33 @@ static uint32_t halfWindowStartMs = 0; // initialized in setup
 // --- Ring buffer for packed samples ---
 static reg_buffer::SampleRingBuffer g_ringbuf;
 
-// --- Heart rate estimation state (adapted from sensors_demo) ---
-static float hrBpm = 0.0f;            // most recent BPM estimate
-static int   hrBpmAvg = 0;            // rolling small average
-static const byte HR_RATE_SIZE = 4;   // smoothing window
-static byte  hrRates[HR_RATE_SIZE] = {0};
-static byte  hrRateSpot = 0;
-static uint32_t lastBeatMs = 0;       // timestamp of last confirmed beat
-// Beat interval buffer for median smoothing
-static const uint8_t BEAT_INT_SIZE = 8;
-static uint16_t beatIntervals[BEAT_INT_SIZE] = {0};
-static uint8_t  beatIntCount = 0;
+// --- Barebones heart rate estimation state ---
+static float hrBpm = 0.0f;            // latest BPM (unsmoothed)
+static uint32_t lastBeatMs = 0;       // timestamp of last beat (ms)
 
-static float medianIntervalMs() {
-  if (beatIntCount < 3) return 0.0f;
-  uint16_t temp[BEAT_INT_SIZE];
-  for (uint8_t i = 0; i < beatIntCount; ++i) temp[i] = beatIntervals[i];
-  for (uint8_t i = 1; i < beatIntCount; ++i) { // insertion sort
-    uint16_t v = temp[i]; int j = i - 1; while (j >= 0 && temp[j] > v) { temp[j+1] = temp[j]; --j; } temp[j+1] = v;
-  }
-  if (beatIntCount & 1) return (float)temp[beatIntCount/2];
-  uint16_t a = temp[(beatIntCount/2)-1]; uint16_t b = temp[beatIntCount/2]; return (a + b) * 0.5f;
-}
-
-// Adaptive beat detection on IR channel (simplified)
-static bool detectBeat(long ir)
+// Very simple beat detection: baseline + relative threshold, rising edge, refractory.
+static bool simpleBeatDetect(uint32_t ir)
 {
-  static float dcMean = 0.0f;           // DC removal baseline
-  const float alphaDC = 0.97f;
-  dcMean = alphaDC * dcMean + (1.0f - alphaDC) * ir;
-  float ac = ir - dcMean;
-  static float prevAc = 0.0f;
-  float hp = ac - prevAc; prevAc = ac;
-  static float lp = 0.0f;               // low-pass of high-pass result
-  lp = 0.85f * lp + 0.15f * hp;
-  static float dynThresh = 0.0f;        // dynamic amplitude tracking
-  dynThresh = 0.995f * dynThresh + 0.005f * fabs(lp);
-  const float PEAK_FACTOR = 1.25f;
-  static float prevLp = 0.0f;
+  static float baseline = 0.0f;                // adaptive DC baseline
+  if (baseline == 0.0f) baseline = (float)ir;   // initialize to first reading
+  // Faster adaptation reduces diff amplitude (fewer false peaks at rest)
+  baseline = 0.98f * baseline + 0.02f * ir;    // ~50 sample time constant (@55Hz ≈0.9s)
+  float diff = (float)ir - baseline;
+  float threshold = baseline * 0.004f;         // keep same relative threshold
+  static bool prevAbove = false;
   uint32_t now = millis();
-  static uint32_t lastPeakMs = 0;
-  const uint32_t REFRACTORY_MS = 450;   // max displayed BPM ~133
-  bool risingCross = (lp > dynThresh * PEAK_FACTOR) && (prevLp <= dynThresh * PEAK_FACTOR);
+  const uint32_t REFRACTORY_MS = 500;          // ignore beats faster than 120 BPM
+  bool rising = (diff > threshold) && !prevAbove;
   bool beat = false;
-  if (risingCross && (now - lastPeakMs) > REFRACTORY_MS) {
-    lastPeakMs = now; beat = true;
+  if (rising && (now - lastBeatMs) > REFRACTORY_MS) {
+    beat = true;
+    uint32_t delta = now - lastBeatMs;
+    lastBeatMs = now;
+    if (delta > 600 && delta < 2000) {         // plausible 30-100 BPM
+      hrBpm = 60000.0f / (float)delta;
+    }
   }
-  prevLp = lp;
+  prevAbove = diff > threshold;
   return beat;
 }
 
@@ -261,31 +263,10 @@ static void samplePpg() {
   if (!p.ok) return;
   redSum += p.red; irSum += p.ir; ppgCount++;
   halfRedSum += p.red; halfIrSum += p.ir; halfPpgCount++;
-  long irValue = (long)p.ir; // use IR for beat detection
-  if (detectBeat(irValue)) {
-    uint32_t now = millis();
-    uint32_t delta = now - lastBeatMs; lastBeatMs = now;
-    if (delta > 0 && delta < 3000) {
-      if (beatIntCount < BEAT_INT_SIZE) {
-        beatIntervals[beatIntCount++] = (uint16_t)delta;
-      } else {
-        for (uint8_t i = 1; i < BEAT_INT_SIZE; ++i) beatIntervals[i-1] = beatIntervals[i];
-        beatIntervals[BEAT_INT_SIZE-1] = (uint16_t)delta;
-      }
-      float med = medianIntervalMs();
-      if (med > 300.0f && med < 1500.0f) { // plausible 40-200 BPM window
-        hrBpm = 60000.0f / med;
-        if (hrBpm > 30.0f && hrBpm < 200.0f) {
-          hrRates[hrRateSpot++] = (byte)hrBpm; hrRateSpot %= HR_RATE_SIZE;
-          int sum = 0; for (byte i = 0; i < HR_RATE_SIZE; ++i) sum += hrRates[i];
-          hrBpmAvg = sum / HR_RATE_SIZE;
-        }
-      }
-    }
-  }
+  (void)simpleBeatDetect(p.ir); // updates hrBpm internally
 }
 static void sampleTemp() {
-  float c; if (!max30205_readTemp(c)) return; bodyTempCSum += c; bodyTempFSum += (c * 9.0/5.0 + 32.0); tempCount++; }
+  float c; if (!max30205_readTemp(c)) return; bodyTempCSum += c; bodyTempFSum += (c * 9.0/5.0 + 32.0); tempCount++; halfBodyTempCSum += c; halfTempCount++; }
 
 static void packHalfWindowIfDue() {
   uint32_t now = millis();
@@ -307,7 +288,7 @@ static void packHalfWindowIfDue() {
     s.gx = (reg_buffer::float16)(isnan(gxAvg) ? 0.f : gxAvg);
     s.gy = (reg_buffer::float16)(isnan(gyAvg) ? 0.f : gyAvg);
     s.gz = (reg_buffer::float16)(isnan(gzAvg) ? 0.f : gzAvg);
-    s.hr_bpm = (reg_buffer::float16)(hrBpmAvg > 0 ? hrBpmAvg : 0);
+    s.hr_bpm = (reg_buffer::float16)(hrBpm > 0 ? hrBpm : 0);
     s.temp_c = (reg_buffer::float16)(isnan(bodyTCAvg) ? 0.f : bodyTCAvg);
     s.epoch_min = (float)millis() / 60000.f;
     if (!g_ringbuf.push(s)) {
@@ -358,7 +339,7 @@ void loop() {
     if (!isnan(imuTempFAvg)) Serial.printf(" imuT=%.1fF", imuTempFAvg);
     Serial.print("\n");
     Serial.printf("1s AVG PPG at sample rate %uHz (target>50) RED=%.0f IR=%.0f\n", ppgCount, redAvg, irAvg);
-    Serial.printf("HR current=%.1f BPM avg=%d beats=%u\n", hrBpm, hrBpmAvg, (unsigned)beatIntCount);
+    Serial.printf("HR=%.1f BPM\n", hrBpm);
     if (!isnan(bodyTCAvg)) {
       Serial.printf("1s AVG BodyTemp at sample rate %uHz: %.2fC (%.2fF)\n", tempCount, bodyTCAvg, bodyTFAvg);
     } else {
