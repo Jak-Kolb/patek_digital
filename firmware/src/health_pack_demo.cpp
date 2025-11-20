@@ -17,6 +17,7 @@
 #include "MAX30105.h"
 #include "heartRate.h"
 #include <Adafruit_AHTX0.h>
+#include <MAX30205.h>
 #include "SparkFun_BMI270_Arduino_Library.h"
 #include "ringbuf/reg_buffer.h"
 #include "buffer_layout.h"
@@ -29,7 +30,12 @@
 // Sensors
 MAX30105 particleSensor;    // MAX30102 via MAX30105 class
 BMI270   imu;
+#if USE_AHT20
 Adafruit_AHTX0 aht;
+#endif
+#if USE_MAX30205
+MAX30205 max30205;
+#endif
 
 // Sampling & pack cadence (spec requirement)
 // - PPG acquisition: >= 50 Hz (we configure MAX30102 to 100 sps)
@@ -241,10 +247,17 @@ void setup() {
     Serial.println("BMI270 not found");
   }
 
-  // AHT20
-  if (!aht.begin()) {
-    Serial.println("AHT20 not found");
-  }
+  // Temperature sensor init
+  #if USE_AHT20
+    if (!aht.begin()) {
+      Serial.println("AHT20 not found");
+    }
+  #endif
+  #if USE_MAX30205
+    if (!max30205.begin(I2C_ADDR_MAX30205)) {
+      Serial.println("MAX30205 not found");
+    }
+  #endif
 }
 
 void loop() {
@@ -285,9 +298,15 @@ void loop() {
   // --- AHT20: update temperature at ~1 Hz ---
   // Keep last_temp_c in Celsius; convert to Fahrenheit only when packing/printing
   if (now - last_temp_ms >= TEMP_PERIOD_MS) {
-    sensors_event_t h, t;
-    aht.getEvent(&h, &t);
-    if (isfinite(t.temperature)) last_temp_c = t.temperature;
+    #if USE_AHT20
+      sensors_event_t h, t;
+      aht.getEvent(&h, &t);
+      if (isfinite(t.temperature)) last_temp_c = t.temperature;
+    #endif
+    #if USE_MAX30205
+      float tc = max30205.read();
+      if (isfinite(tc)) last_temp_c = tc;
+    #endif
     last_temp_ms = now;
   }
 

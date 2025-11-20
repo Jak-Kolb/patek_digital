@@ -32,7 +32,7 @@ constexpr char kCmdSend[] = "SEND";
 constexpr char kCmdErase[] = "ERASE";
 
 // LED configuration
-constexpr int kBlueLedPin = 2;  // Onboard LED pin for most ESP32 dev boards
+constexpr int kBlueLedPin = 25;  // Avoid strap pins (GPIO2) on bare modules; use GPIO25
 constexpr uint32_t kLedFlashDurationMs = 100;  // LED flash duration for BLE activity
 
 // ===== Subsystem 1 (PCB Hardware Communication) =====
@@ -47,6 +47,15 @@ constexpr uint32_t kLedFlashDurationMs = 100;  // LED flash duration for BLE act
 #define I2C_ADDR_BMI270         0x68
 #define I2C_ADDR_MAX30205       0x48
 
+// Temperature sensor selection
+// Set exactly one of these to 1
+#ifndef USE_AHT20
+#define USE_AHT20               0
+#endif
+#ifndef USE_MAX30205
+#define USE_MAX30205            1
+#endif
+
 // Sampling cadences (ms)
 #define PPG_INTERVAL_MS         20     // ~50 Hz
 #define IMU_INTERVAL_MS         10     // ~100 Hz
@@ -57,7 +66,7 @@ constexpr uint32_t kLedFlashDurationMs = 100;  // LED flash duration for BLE act
 #define MAX30102_INT_PIN        -1    // e.g., 19 if MAX30102 INT connected
 #endif
 #ifndef BMI270_INT_PIN
-#define BMI270_INT_PIN          -1    // e.g., 18 if BMI270 INT1/INT2 connected
+#define BMI270_INT_PIN          34    // BMI270 INT wired to GPIO34 (input-only)
 #endif
 
 // Optional light sleep between interrupts (requires proper wake-capable pins and wiring)
