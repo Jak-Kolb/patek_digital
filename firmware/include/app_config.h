@@ -32,6 +32,53 @@ constexpr char kCmdSend[] = "SEND";
 constexpr char kCmdErase[] = "ERASE";
 
 // LED configuration
-constexpr int kBlueLedPin = 2;  // Onboard LED pin for most ESP32 dev boards
+constexpr int kBlueLedPin = 25;  // Avoid strap pins (GPIO2) on bare modules; use GPIO25
 constexpr uint32_t kLedFlashDurationMs = 100;  // LED flash duration for BLE activity
+
+// ===== Subsystem 1 (PCB Hardware Communication) =====
+#define I2C_CLOCK_HZ            400000
+
+// ESP32 DevKit V1 I2C pins
+#define I2C_SDA_PIN             21
+#define I2C_SCL_PIN             22
+
+// 7-bit I2C addresses (adjust if your parts differ)
+#define I2C_ADDR_MAX30102       0x57
+#define I2C_ADDR_BMI270         0x68
+#define I2C_ADDR_MAX30205       0x48
+
+// Temperature sensor selection
+// Set exactly one of these to 1
+#ifndef USE_AHT20
+#define USE_AHT20               0
+#endif
+#ifndef USE_MAX30205
+#define USE_MAX30205            1
+#endif
+
+// Sampling cadences (ms)
+#define PPG_INTERVAL_MS         20     // ~50 Hz
+#define IMU_INTERVAL_MS         10     // ~100 Hz
+#define TEMP_INTERVAL_MS        1000   // ~1 Hz
+
+// Optional GPIO interrupt pins (set to actual pins if wired; leave -1 if not used)
+#ifndef MAX30102_INT_PIN
+#define MAX30102_INT_PIN        -1    // e.g., 19 if MAX30102 INT connected
+#endif
+#ifndef BMI270_INT_PIN
+#define BMI270_INT_PIN          34    // BMI270 INT wired to GPIO34 (input-only)
+#endif
+
+// Optional light sleep between interrupts (requires proper wake-capable pins and wiring)
+#ifndef ENABLE_LIGHT_SLEEP
+#define ENABLE_LIGHT_SLEEP      0
+#endif
+
+// Optional: integrate with your ring buffer
+// #define SUB1_USE_RINGBUF 1
+
+// ===== Ring buffer config (Subsystem 1 -> Subsystem 2) =====
+#define REG_BUFFER_PAGE_BYTES   256     // fixed page size
+#define REG_BUFFER_SLOTS        32      // total pages in ring (adjust as needed)
+
 
