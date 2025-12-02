@@ -7,6 +7,8 @@
 
 #include <Arduino.h>
 #include <Wire.h>
+#include <ctime>
+#include <sys/time.h>
 #include "sensors.h"
 #include "app_config.h"
 #include <SparkFun_BMI270_Arduino_Library.h>
@@ -183,8 +185,8 @@ static uint32_t halfPpgCount = 0; static double halfRedSum=0, halfIrSum=0;
 static uint32_t halfTempCount = 0; static double halfBodyTempCSum=0; // store C only; F derived when packing
 static uint32_t halfWindowStartMs = 0; // initialized in setup
 
-// --- Ring buffer for packed samples ---
-static reg_buffer::SampleRingBuffer g_ringbuf;
+// --- Ring buffer target ---
+static reg_buffer::SampleRingBuffer* g_targetBuffer = nullptr;
 
 // --- Barebones heart rate estimation state ---
 static float hrBpm = 0.0f;            // latest BPM (unsmoothed)
@@ -228,88 +230,70 @@ static hw_timer_t* setupTimer(uint8_t id, uint16_t divider, uint64_t periodUs, v
   return t;
 }
 
-void sensors_setup() {
+void sensors_setup(reg_buffer::SampleRingBuffer* buffer) {
+  g_targetBuffer = buffer;
   // Serial.begin(115200);
   // delay(500);
   Serial.println("\nTimed sensor sampling demo (Phase 2)");
   Wire.begin(I2C_SDA_PIN, I2C_SCL_PIN);
-  Wire.setClock(400000); // full speed for sensor throughput; adjust if bus stability issues
+  Wire.setClock(I2C_CLOCK_HZ); // full speed for sensor throughput; adjust if bus stability issues
   delay(10);
   (void)bmi270_begin();
   (void)max30102_begin();
   (void)max30205_begin();
   // Configure timers: APB 80MHz / divider 80 = 1MHz tick
-  // Add ~5% headroom: IMU 105 Hz (≈9524 us), PPG 55 Hz (≈18182 us)
-  tImu  = setupTimer(0, 80, 9524,     onImuTimer);   // ~105 Hz
-  tPpg  = setupTimer(1, 80, 18182,    onPpgTimer);   // ~55 Hz
+  // Target 25 Hz = 40000 us
+  tImu  = setupTimer(0, 80, 40000,    onImuTimer);   // 25 Hz
+  tPpg  = setupTimer(1, 80, 40000,    onPpgTimer);   // 25 Hz
   tTemp = setupTimer(2, 80, 1000000,  onTempTimer);  // 1 Hz
   halfWindowStartMs = millis();
 }
 
+static float lastBodyTempC = 0.0f;
+
 static void sampleImu() {
   ImuSample s = bmi270_read();
   if (!s.ok) return;
+  
+  // Push raw sample to ring buffer immediately
+  if (g_targetBuffer) {
+    reg_buffer::Sample rs{};
+    rs.ax = (reg_buffer::float16)s.ax;
+    rs.ay = (reg_buffer::float16)s.ay;
+    rs.az = (reg_buffer::float16)s.az;
+    rs.gx = (reg_buffer::float16)s.gx;
+    rs.gy = (reg_buffer::float16)s.gy;
+    rs.gz = (reg_buffer::float16)s.gz;
+    rs.hr_bpm = (reg_buffer::float16)(hrBpm > 0 ? hrBpm : 0);
+    rs.temp_c = (reg_buffer::float16)lastBodyTempC;
+    
+    const time_t t_now = time(nullptr);
+    if (t_now > 1000000000) {
+        rs.epoch_min = (float)(t_now / 60);
+    } else {
+        rs.epoch_min = (float)millis() / 60000.f;
+    }
+    
+    if (!g_targetBuffer->push(rs)) {
+      // Serial.println("Ring buffer full; sample dropped");
+    }
+  }
+
   axSum += s.ax; aySum += s.ay; azSum += s.az;
   gxSum += s.gx; gySum += s.gy; gzSum += s.gz;
   if (!isnan(s.tempC)) imuTempSumF += (s.tempC * 1.8 + 32.0);
   imuCount++;
-  // half-window accumulation
-  halfAxSum += s.ax; halfAySum += s.ay; halfAzSum += s.az;
-  halfGxSum += s.gx; halfGySum += s.gy; halfGzSum += s.gz;
-  if (!isnan(s.tempC)) halfImuTempSumF += (s.tempC * 1.8 + 32.0);
-  halfImuCount++;
 }
 static void samplePpg() {
   PpgSample p = max30102_readOne();
   if (!p.ok) return;
   redSum += p.red; irSum += p.ir; ppgCount++;
-  halfRedSum += p.red; halfIrSum += p.ir; halfPpgCount++;
   (void)simpleBeatDetect(p.ir); // updates hrBpm internally
 }
 static void sampleTemp() {
-  float c; if (!max30205_readTemp(c)) return; bodyTempCSum += c; bodyTempFSum += (c * 9.0/5.0 + 32.0); tempCount++; halfBodyTempCSum += c; halfTempCount++; }
-
-static void packHalfWindowIfDue() {
-  uint32_t now = millis();
-  if (now - halfWindowStartMs < 500) return;
-  // Compute averages for 500ms window
-  double axAvg = halfImuCount ? halfAxSum / halfImuCount : NAN;
-  double ayAvg = halfImuCount ? halfAySum / halfImuCount : NAN;
-  double azAvg = halfImuCount ? halfAzSum / halfImuCount : NAN;
-  double gxAvg = halfImuCount ? halfGxSum / halfImuCount : NAN;
-  double gyAvg = halfImuCount ? halfGySum / halfImuCount : NAN;
-  double gzAvg = halfImuCount ? halfGzSum / halfImuCount : NAN;
-  double bodyTCAvg = halfTempCount ? halfBodyTempCSum / halfTempCount : NAN;
-  // Note: we keep HR as current rolling average
-  if (halfImuCount || halfPpgCount || halfTempCount) {
-    reg_buffer::Sample s{};
-    s.ax = (reg_buffer::float16)(isnan(axAvg) ? 0.f : axAvg);
-    s.ay = (reg_buffer::float16)(isnan(ayAvg) ? 0.f : ayAvg);
-    s.az = (reg_buffer::float16)(isnan(azAvg) ? 0.f : azAvg);
-    s.gx = (reg_buffer::float16)(isnan(gxAvg) ? 0.f : gxAvg);
-    s.gy = (reg_buffer::float16)(isnan(gyAvg) ? 0.f : gyAvg);
-    s.gz = (reg_buffer::float16)(isnan(gzAvg) ? 0.f : gzAvg);
-    s.hr_bpm = (reg_buffer::float16)(hrBpm > 0 ? hrBpm : 0);
-    s.temp_c = (reg_buffer::float16)(isnan(bodyTCAvg) ? 0.f : bodyTCAvg);
-    s.epoch_min = (float)millis() / 60000.f;
-    if (!g_ringbuf.push(s)) {
-      Serial.println("Ring buffer full; sample dropped");
-    } else {
-      Serial.printf("RB+ sz=%u ax=%.2f ay=%.2f az=%.2f gx=%.2f gy=%.2f gz=%.2f hr=%.1f tempC=%.2f epoch_min=%.2f\n",
-                    (unsigned)g_ringbuf.size(),
-                    (double)s.ax, (double)s.ay, (double)s.az,
-                    (double)s.gx, (double)s.gy, (double)s.gz,
-                    (double)s.hr_bpm, (double)s.temp_c, (double)s.epoch_min);
-    }
-  }
-  // Reset half-window accumulators
-  halfAxSum=halfAySum=halfAzSum=halfGxSum=halfGySum=halfGzSum=halfImuTempSumF=0; halfImuCount=0;
-  halfRedSum=halfIrSum=0; halfPpgCount=0;
-  halfBodyTempCSum=0; halfTempCount=0;
-  // Advance window start (avoid drift by exact increments)
-  halfWindowStartMs += 500;
-  // In case of drift (e.g., long operations), clamp to now
-  if ((int32_t)(now - halfWindowStartMs) >= 0) halfWindowStartMs = now; // prevent multi-lag
+  float c; if (!max30205_readTemp(c)) return; 
+  lastBodyTempC = c;
+  bodyTempCSum += c; bodyTempFSum += (c * 9.0/5.0 + 32.0); tempCount++; 
 }
 
 void sensors_loop() {
@@ -317,9 +301,6 @@ void sensors_loop() {
   if (imuDue) { imuDue = false; sampleImu(); }
   if (ppgDue) { ppgDue = false; samplePpg(); }
   if (tempDue) { tempDue = false; sampleTemp(); }
-
-  // 500ms packing check
-  packHalfWindowIfDue();
 
   if (secondFlag) {
     secondFlag = false;
@@ -336,10 +317,10 @@ void sensors_loop() {
     double bodyTCAvg = tempCount ? bodyTempCSum / tempCount : NAN;
     double bodyTFAvg = tempCount ? bodyTempFSum / tempCount : NAN;
 
-    Serial.printf("1s AVG IMU at sample rate %uHz (target>100) a[g]=[% .3f % .3f % .3f] g[dps]=[% .2f % .2f % .2f]", imuCount, axAvg, ayAvg, azAvg, gxAvg, gyAvg, gzAvg);
+    Serial.printf("1s AVG IMU at sample rate %uHz (target 25) a[g]=[% .3f % .3f % .3f] g[dps]=[% .2f % .2f % .2f]", imuCount, axAvg, ayAvg, azAvg, gxAvg, gyAvg, gzAvg);
     if (!isnan(imuTempFAvg)) Serial.printf(" imuT=%.1fF", imuTempFAvg);
     Serial.print("\n");
-    Serial.printf("1s AVG PPG at sample rate %uHz (target>50) RED=%.0f IR=%.0f\n", ppgCount, redAvg, irAvg);
+    Serial.printf("1s AVG PPG at sample rate %uHz (target 25) RED=%.0f IR=%.0f\n", ppgCount, redAvg, irAvg);
     Serial.printf("HR=%.1f BPM\n", hrBpm);
     if (!isnan(bodyTCAvg)) {
       Serial.printf("1s AVG BodyTemp at sample rate %uHz: %.2fC (%.2fF)\n", tempCount, bodyTCAvg, bodyTFAvg);

@@ -3,13 +3,12 @@
 #include <array>
 #include <ctime>
 #include <algorithm>
+#include <cmath>
+#include <vector>
 
 namespace consolidate {
 
 namespace {
-  constexpr int32_t kStepOnThresholdSq = 600 * 600;   // Horizontal accel spike
-  constexpr int32_t kStepOffThresholdSq = 400 * 400;
-
   template<typename T>
   T clamp(T value, T min_val, T max_val) {
     return std::max(min_val, std::min(value, max_val));
@@ -24,35 +23,64 @@ bool consolidate(const reg_buffer::Sample* samples,
   }
 
   // Accumulate sensor data
-  uint64_t hr_sum = 0;
-  int64_t temp_sum = 0;
+  double hr_sum = 0;
+  double temp_sum = 0;
   uint16_t steps = 0;
-  bool step_high = false;
 
-  for (size_t i = 0; i < sample_count; ++i) {
-    const auto& s = samples[i];
-    hr_sum += s.hr_x10;
-    temp_sum += s.temp_x100;
+  // Pass 1: Calculate average magnitude to determine gravity baseline
+  double mag_sum = 0;
+  // Use a small local buffer for magnitudes to avoid re-calculating sqrt
+  // Assuming sample_count is small (e.g. 25)
+  std::vector<float> mags(sample_count); 
+  
+  for(size_t i=0; i<sample_count; ++i) {
+      const auto& s = samples[i];
+      float ax = (float)s.ax;
+      float ay = (float)s.ay;
+      float az = (float)s.az;
+      float m = std::sqrt(ax*ax + ay*ay + az*az);
+      mags[i] = m;
+      mag_sum += m;
 
-    // Step detection using horizontal acceleration magnitude
-    const int32_t horizontal_mag_sq = 
-        static_cast<int32_t>(s.ax) * s.ax + static_cast<int32_t>(s.ay) * s.ay;
+      hr_sum += (float)s.hr_bpm;
+      temp_sum += (float)s.temp_c;
+  }
+  
+  float avg_mag = mag_sum / sample_count;
+  
+  // Pass 2: Detect steps
+  // Threshold: 15% above baseline
+  float threshold = avg_mag * 0.15f; 
+  
+  // Clamp min threshold to avoid noise triggering when still
+  // If units are g (avg ~ 1.0), min threshold 0.05g
+  // If units are raw (avg ~ 16384), min threshold 800
+  if (avg_mag < 100.0f) {
+      if (threshold < 0.05f) threshold = 0.05f;
+  } else {
+      if (threshold < 800.0f) threshold = 800.0f;
+  }
 
-    if (!step_high && horizontal_mag_sq >= kStepOnThresholdSq) {
-      steps++;
-      step_high = true;
-    } else if (step_high && horizontal_mag_sq <= kStepOffThresholdSq) {
-      step_high = false;
-    }
+  bool in_step = false;
+  for(size_t i=0; i<sample_count; ++i) {
+      if (!in_step && mags[i] > avg_mag + threshold) {
+          steps++;
+          in_step = true;
+      } else if (in_step && mags[i] < avg_mag) { // Reset when crossing mean
+          in_step = false;
+      }
   }
 
   // Calculate averages and build record
+  double avg_hr = hr_sum / sample_count;
+  double avg_temp = temp_sum / sample_count;
+
   record_out.avg_hr_x10 = static_cast<uint16_t>(
-      clamp<uint64_t>(hr_sum / sample_count, 0, UINT16_MAX));
+      clamp<double>(avg_hr * 10.0, 0, 65535.0));
   record_out.avg_temp_x100 = static_cast<int16_t>(
-      clamp<int64_t>(temp_sum / sample_count, INT16_MIN, INT16_MAX));
+      clamp<double>(avg_temp * 100.0, -32768.0, 32767.0));
   record_out.step_count = steps;
-  record_out.epoch_min = samples[sample_count - 1].epoch_min;
+  record_out.epoch_min = static_cast<uint32_t>(samples[sample_count - 1].epoch_min);
 
   // Debug output with timestamp if available
   char time_buf[24] = "";

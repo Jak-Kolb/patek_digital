@@ -93,7 +93,7 @@ static_assert(sizeof(Sample) == 20, "Sample must remain 20 bytes (8*half + float
 // Fixed-size circular buffer tailored for 64 sensor samples.
 class SampleRingBuffer {
  public:
-    static constexpr size_t kCapacity = 64;
+    static constexpr size_t kCapacity = 256;
 
     SampleRingBuffer();
 

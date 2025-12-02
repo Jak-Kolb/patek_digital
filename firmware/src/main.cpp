@@ -9,8 +9,9 @@
 #include "ringbuf/reg_buffer.h"
 #include "compute/consolidate.h"
 #include "storage/fs_store.h"
-#include "compute/mockdata.h"
+// #include "compute/mockdata.h"
 #include "ble/ble_service.h"
+#include "sensors.h"
 
 namespace {
 
@@ -82,9 +83,12 @@ void setup() {
   bleServer.onTransferComplete = handle_transfer_complete;
   Serial.println("[MAIN] BLE server initialized");
 
+  sensors_setup(&gRing);
 }
 
 void loop() {
+  sensors_loop();
+  
   // const uint32_t now = millis();
   // if (now - gLastProcess >= kLoopIntervalMs) {
   //   gLastProcess = now;
@@ -100,32 +104,29 @@ void loop() {
   // else {
   //   Serial.println("WiFi not connected, retrying...");
   //   delay(5000);  // Retry every 5 seconds if not connected
-  // }
-
-
   if (gResetRingRequested) {
     gRing.clear();
     gResetRingRequested = false;
   }
 
-  reg_buffer::Sample sample{}; // initialize cycle reading struct
+  // reg_buffer::Sample sample{}; // initialize cycle reading struct
 
 
-  mockdata::mockReadIMU(sample.ax, sample.ay, sample.az,
-                        sample.gx, sample.gy, sample.gz);
-  mockdata::mockReadHR(sample.hr_x10); // generating mock data
-  mockdata::mockReadTemp(sample.temp_x100);
+  // mockdata::mockReadIMU(sample.ax, sample.ay, sample.az,
+  //                       sample.gx, sample.gy, sample.gz);
+  // mockdata::mockReadHR(sample.hr_x10); // generating mock data
+  // mockdata::mockReadTemp(sample.temp_x100);
 
 
-  const time_t now = time(nullptr);
+  // const time_t now = time(nullptr);
 
-  if (now > 0) {
-    sample.epoch_min = static_cast<uint32_t>(now / 60);
-  } else {
-    const uint32_t base = gFallbackBaseMillis;
-    const uint32_t elapsed_ms = millis() - base;
-    sample.epoch_min = static_cast<uint32_t>(elapsed_ms / 60000UL);
-  }
+  // if (now > 0) {
+  //   sample.epoch_min = static_cast<uint32_t>(now / 60);
+  // } else {
+  //   const uint32_t base = gFallbackBaseMillis;
+  //   const uint32_t elapsed_ms = millis() - base;
+  //   sample.epoch_min = static_cast<uint32_t>(elapsed_ms / 60000UL);
+  // }
   
   // Serial.printf("Sample: epoch_min=%lu ax=%d ay=%d az=%d gx=%d gy=%d gz=%d hr_x10=%u temp_x100=%d\n",
   //               static_cast<unsigned long>(sample.epoch_min),
@@ -133,11 +134,12 @@ void loop() {
   //               sample.gx, sample.gy, sample.gz,
   //               sample.hr_x10, sample.temp_x100);
 
-  if (!gRing.push(sample)) {
-    Serial.println("Ring buffer overrun");
-  } else {
-    // Serial.printf("Ring buffer size: %u\n", static_cast<unsigned>(gRing.size()));
-  }
+  // if (!gRing.push(sample)) {
+  //   Serial.println("Ring buffer overrun");
+  // } else {
+  //   // Serial.printf("Ring buffer size: %u\n", static_cast<unsigned>(gRing.size()));
+  // }
+
 
   consolidate::ConsolidatedRecord record{};
   if (consolidate::consolidate_from_ring(gRing, record)) {
@@ -149,7 +151,7 @@ void loop() {
     }
   }
   bleServer.update();
-  delay(25);
+  delay(5);
 
   // working data generation and storage basic
   /*

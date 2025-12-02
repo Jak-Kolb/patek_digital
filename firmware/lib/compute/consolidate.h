@@ -7,7 +7,7 @@
 
 namespace consolidate {
 
-constexpr size_t kSamplesPerWindow = 60;  // 30 s @ 2 Hz
+constexpr size_t kSamplesPerWindow = 25;  // 1 s @ 25 Hz
 
 #pragma pack(push, 1)
 struct ConsolidatedRecord {
