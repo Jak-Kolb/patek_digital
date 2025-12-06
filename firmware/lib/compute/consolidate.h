@@ -7,14 +7,14 @@
 
 namespace consolidate {
 
-constexpr size_t kSamplesPerWindow = 25;  // 1 s @ 25 Hz
+constexpr size_t kSamplesPerWindow = 125;  // 5 s @ 25 Hz
 
 #pragma pack(push, 1)
 struct ConsolidatedRecord {
     uint16_t avg_hr_x10;
     int16_t avg_temp_x100;
     uint16_t step_count;
-    uint32_t epoch_min;
+    uint32_t timestamp;
 };
 #pragma pack(pop)
 

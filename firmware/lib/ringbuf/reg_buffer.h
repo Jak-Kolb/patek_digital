@@ -84,11 +84,11 @@ struct Sample {
     float16 gz;       // gyro Z
     float16 hr_bpm;   // heart rate BPM
     float16 temp_c;   // body temperature Celsius
-    float epoch_min;  // minutes since boot (float32)
+    uint32_t timestamp; // Unix timestamp (seconds)
 };
 #pragma pack(pop)
 
-static_assert(sizeof(Sample) == 20, "Sample must remain 20 bytes (8*half + float32)");
+static_assert(sizeof(Sample) == 20, "Sample must remain 20 bytes (8*half + uint32)");
 
 // Fixed-size circular buffer tailored for 64 sensor samples.
 class SampleRingBuffer {

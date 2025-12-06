@@ -168,6 +168,8 @@ static hw_timer_t* tImu  = nullptr;
 static hw_timer_t* tPpg  = nullptr;
 static hw_timer_t* tTemp = nullptr;
 
+static TaskHandle_t g_sensorTaskHandle = nullptr;
+
 // --- ISR flags ---
 static volatile bool imuDue  = false;
 static volatile bool ppgDue  = false;
@@ -218,9 +220,18 @@ static bool simpleBeatDetect(uint32_t ir)
   return beat;
 }
 
-void IRAM_ATTR onImuTimer()  { imuDue  = true; }
-void IRAM_ATTR onPpgTimer()  { ppgDue  = true; }
-void IRAM_ATTR onTempTimer() { tempDue = true; secondFlag = true; }
+void IRAM_ATTR onImuTimer()  { 
+  imuDue  = true; 
+  if (g_sensorTaskHandle) vTaskNotifyGiveFromISR(g_sensorTaskHandle, NULL);
+}
+void IRAM_ATTR onPpgTimer()  { 
+  ppgDue  = true; 
+  if (g_sensorTaskHandle) vTaskNotifyGiveFromISR(g_sensorTaskHandle, NULL);
+}
+void IRAM_ATTR onTempTimer() { 
+  tempDue = true; secondFlag = true; 
+  if (g_sensorTaskHandle) vTaskNotifyGiveFromISR(g_sensorTaskHandle, NULL);
+}
 
 static hw_timer_t* setupTimer(uint8_t id, uint16_t divider, uint64_t periodUs, void (*isr)()) {
   hw_timer_t* t = timerBegin(id, divider, true);
@@ -229,6 +240,8 @@ static hw_timer_t* setupTimer(uint8_t id, uint16_t divider, uint64_t periodUs, v
   timerAlarmEnable(t);
   return t;
 }
+
+static void sensorsTask(void* arg);
 
 void sensors_setup(reg_buffer::SampleRingBuffer* buffer) {
   g_targetBuffer = buffer;
@@ -247,6 +260,8 @@ void sensors_setup(reg_buffer::SampleRingBuffer* buffer) {
   tPpg  = setupTimer(1, 80, 40000,    onPpgTimer);   // 25 Hz
   tTemp = setupTimer(2, 80, 1000000,  onTempTimer);  // 1 Hz
   halfWindowStartMs = millis();
+
+  xTaskCreatePinnedToCore(sensorsTask, "Sensors", 4096, NULL, 2, &g_sensorTaskHandle, 1);
 }
 
 static float lastBodyTempC = 0.0f;
@@ -269,9 +284,9 @@ static void sampleImu() {
     
     const time_t t_now = time(nullptr);
     if (t_now > 1000000000) {
-        rs.epoch_min = (float)(t_now / 60);
+        rs.timestamp = (uint32_t)t_now;
     } else {
-        rs.epoch_min = (float)millis() / 60000.f;
+        rs.timestamp = (uint32_t)(millis() / 1000);
     }
     
     if (!g_targetBuffer->push(rs)) {
@@ -296,43 +311,49 @@ static void sampleTemp() {
   bodyTempCSum += c; bodyTempFSum += (c * 9.0/5.0 + 32.0); tempCount++; 
 }
 
-void sensors_loop() {
-  // Service due flags (keep ISRs minimal)
-  if (imuDue) { imuDue = false; sampleImu(); }
-  if (ppgDue) { ppgDue = false; samplePpg(); }
-  if (tempDue) { tempDue = false; sampleTemp(); }
+static void sensorsTask(void* arg) {
+  while(true) {
+    ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
 
-  if (secondFlag) {
-    secondFlag = false;
-    // Compute averages
-    double axAvg = imuCount ? axSum / imuCount : NAN;
-    double ayAvg = imuCount ? aySum / imuCount : NAN;
-    double azAvg = imuCount ? azSum / imuCount : NAN;
-    double gxAvg = imuCount ? gxSum / imuCount : NAN;
-    double gyAvg = imuCount ? gySum / imuCount : NAN;
-    double gzAvg = imuCount ? gzSum / imuCount : NAN;
-    double imuTempFAvg = (imuCount && imuTempSumF>0) ? imuTempSumF / imuCount : NAN;
-    double redAvg = ppgCount ? redSum / ppgCount : NAN;
-    double irAvg  = ppgCount ? irSum  / ppgCount : NAN;
-    double bodyTCAvg = tempCount ? bodyTempCSum / tempCount : NAN;
-    double bodyTFAvg = tempCount ? bodyTempFSum / tempCount : NAN;
+    // Service due flags (keep ISRs minimal)
+    if (imuDue) { imuDue = false; sampleImu(); }
+    if (ppgDue) { ppgDue = false; samplePpg(); }
+    if (tempDue) { tempDue = false; sampleTemp(); }
 
-    Serial.printf("1s AVG IMU at sample rate %uHz (target 25) a[g]=[% .3f % .3f % .3f] g[dps]=[% .2f % .2f % .2f]", imuCount, axAvg, ayAvg, azAvg, gxAvg, gyAvg, gzAvg);
-    if (!isnan(imuTempFAvg)) Serial.printf(" imuT=%.1fF", imuTempFAvg);
-    Serial.print("\n");
-    Serial.printf("1s AVG PPG at sample rate %uHz (target 25) RED=%.0f IR=%.0f\n", ppgCount, redAvg, irAvg);
-    Serial.printf("HR=%.1f BPM\n", hrBpm);
-    if (!isnan(bodyTCAvg)) {
-      Serial.printf("1s AVG BodyTemp at sample rate %uHz: %.2fC (%.2fF)\n", tempCount, bodyTCAvg, bodyTFAvg);
-    } else {
-      Serial.println("1s AVG BodyTemp: no samples");
+    if (secondFlag) {
+      secondFlag = false;
+      // Compute averages
+      double axAvg = imuCount ? axSum / imuCount : NAN;
+      double ayAvg = imuCount ? aySum / imuCount : NAN;
+      double azAvg = imuCount ? azSum / imuCount : NAN;
+      double gxAvg = imuCount ? gxSum / imuCount : NAN;
+      double gyAvg = imuCount ? gySum / imuCount : NAN;
+      double gzAvg = imuCount ? gzSum / imuCount : NAN;
+      double imuTempFAvg = (imuCount && imuTempSumF>0) ? imuTempSumF / imuCount : NAN;
+      double redAvg = ppgCount ? redSum / ppgCount : NAN;
+      double irAvg  = ppgCount ? irSum  / ppgCount : NAN;
+      double bodyTCAvg = tempCount ? bodyTempCSum / tempCount : NAN;
+      double bodyTFAvg = tempCount ? bodyTempFSum / tempCount : NAN;
+
+      Serial.printf("1s AVG IMU at sample rate %uHz (target 25) a[g]=[% .3f % .3f % .3f] g[dps]=[% .2f % .2f % .2f]", imuCount, axAvg, ayAvg, azAvg, gxAvg, gyAvg, gzAvg);
+      if (!isnan(imuTempFAvg)) Serial.printf(" imuT=%.1fF", imuTempFAvg);
+      Serial.print("\n");
+      Serial.printf("1s AVG PPG at sample rate %uHz (target 25) RED=%.0f IR=%.0f\n", ppgCount, redAvg, irAvg);
+      Serial.printf("HR=%.1f BPM\n", hrBpm);
+      if (!isnan(bodyTCAvg)) {
+        Serial.printf("1s AVG BodyTemp at sample rate %uHz: %.2fC (%.2fF)\n", tempCount, bodyTCAvg, bodyTFAvg);
+      } else {
+        Serial.println("1s AVG BodyTemp: no samples");
+      }
+      Serial.println("---");
+      // Reset accumulators for next window
+      axSum=aySum=azSum=gxSum=gySum=gzSum=imuTempSumF=0; imuCount=0;
+      redSum=irSum=0; ppgCount=0;
+      bodyTempCSum=bodyTempFSum=0; tempCount=0;
     }
-    Serial.println("---");
-    // Reset accumulators for next window
-    axSum=aySum=azSum=gxSum=gySum=gzSum=imuTempSumF=0; imuCount=0;
-    redSum=irSum=0; ppgCount=0;
-    bodyTempCSum=bodyTempFSum=0; tempCount=0;
   }
-  // Small delay to yield; all real work is event-driven
-  delay(1);
+}
+
+void sensors_loop() {
+  // Empty - logic moved to sensorsTask
 }

@@ -62,12 +62,12 @@ void printData() {
       break;
     }
     size_t abs_addr = PARTITION_BASE_ADDR + offset;
-    const time_t epoch_sec = static_cast<time_t>(record.epoch_min) * 60;
+    const time_t epoch_sec = static_cast<time_t>(record.timestamp);
     const struct tm* tm_ptr = gmtime(&epoch_sec);
     char time_buf[24] = {0};
-    if (tm_ptr != nullptr) {
+    if (tm_ptr != nullptr && epoch_sec > 1000000000) {
       struct tm tm_copy = *tm_ptr;
-      strftime(time_buf, sizeof(time_buf), "%Y-%m-%d %H:%M", &tm_copy);
+      strftime(time_buf, sizeof(time_buf), "%Y-%m-%d %H:%M:%S", &tm_copy);
     }
 
     Serial.printf(

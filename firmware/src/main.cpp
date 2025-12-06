@@ -145,7 +145,7 @@ void loop() {
   if (consolidate::consolidate_from_ring(gRing, record)) {
     if (fs_store::append(record)) {
       Serial.println("[STORE] Consolidated record appended");
-      fs_store::printData();
+      // fs_store::printData(); // Disable full dump to prevent blocking
     } else {
       Serial.println("[STORE] Failed to append record");
     }

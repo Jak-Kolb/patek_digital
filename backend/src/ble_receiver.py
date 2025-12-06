@@ -34,7 +34,7 @@ DATA_MARKER = 0x02
 END_MARKER = 0x03
 
 # Struct format: <HhHI (uint16, int16, uint16, uint32)
-# Matches: avg_hr_x10, avg_temp_x100, step_count, epoch_min
+# Matches: avg_hr_x10, avg_temp_x100, step_count, timestamp
 RECORD_STRUCT = struct.Struct("<HhHI")
 
 
@@ -59,12 +59,12 @@ class TransferState:
 
 
 def decode_record(payload: bytes) -> dict:
-    avg_hr_x10, avg_temp_x100, step_count, epoch_min = RECORD_STRUCT.unpack(payload)
+    avg_hr_x10, avg_temp_x100, step_count, timestamp = RECORD_STRUCT.unpack(payload)
     return {
         "avg_hr_x10": int(avg_hr_x10),
         "avg_temp_x100": int(avg_temp_x100),
         "step_count": int(step_count),
-        "epoch_min": int(epoch_min),
+        "timestamp": int(timestamp),
     }
 
 
@@ -198,7 +198,7 @@ async def upload_to_supabase(device_id: str, records: List[dict], height_inches:
     if height_inches and weight_lbs:
         total_calories = calculate_calories_burned(total_steps, weight_lbs, height_inches)
     
-    timestamps = [rec['epoch_min'] * 60 for rec in records]
+    timestamps = [rec['timestamp'] for rec in records]
     first_ts = datetime.fromtimestamp(min(timestamps))
     last_ts = datetime.fromtimestamp(max(timestamps))
     
@@ -209,8 +209,8 @@ async def upload_to_supabase(device_id: str, records: List[dict], height_inches:
             'heart_rate': rec['avg_hr_x10'] / 10.0,
             'temperature': rec['avg_temp_x100'] / 100.0,
             'steps': rec['step_count'],
-            'timestamp': datetime.fromtimestamp(rec['epoch_min'] * 60).isoformat(),
-            'epoch_min': rec['epoch_min']
+            'timestamp': datetime.fromtimestamp(rec['timestamp']).isoformat(),
+            'epoch_min': rec['timestamp'] // 60 # Keep for backward compatibility if needed, or remove
         })
     
     # Batch insert
