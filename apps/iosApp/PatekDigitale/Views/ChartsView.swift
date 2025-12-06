@@ -590,7 +590,7 @@ struct TemperatureChartView: View {
                     }
                 }
                 // Set Y-axis range for typical body temperature
-                .chartYScale(domain: 95...105)
+                .chartYScale(domain: 60...110)
                 // Enable chart selection
                 .chartXSelection(value: $selectedTimestamp)
                 .onChange(of: selectedTimestamp) { oldValue, newValue in

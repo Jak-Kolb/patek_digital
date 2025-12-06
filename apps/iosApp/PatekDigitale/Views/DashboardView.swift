@@ -26,6 +26,21 @@ struct DashboardView: View {
     // Animation state for heart rate pulsing
     @State private var heartPulse = false
     
+    // Calculate total steps for today
+    private var todaysTotalSteps: Int {
+        let calendar = Calendar.current
+        let startOfToday = calendar.startOfDay(for: Date())
+        
+        // Filter readings from today and sum their step counts
+        let todaysReadings = readings.filter { reading in
+            guard let timestamp = reading.timestamp else { return false }
+            return calendar.isDate(timestamp, inSameDayAs: startOfToday)
+        }
+        
+        return todaysReadings.reduce(0) { $0 + Int($1.stepCount) }
+    }
+
+    
     var body: some View {
         NavigationView {
             ScrollView {
@@ -49,7 +64,7 @@ struct DashboardView: View {
                         
                         // Step Count Card with progress ring
                         StepCountCard(
-                            steps: Int(latest.stepCount),
+                            steps: todaysTotalSteps,
                             goal: 10000
                         )
                         .padding(.horizontal)
@@ -94,11 +109,25 @@ struct DashboardView: View {
                 // Initialize BLE manager context
                 bleManager.setContext(context)
                 
+                // Clear all old data (TEMPORARY - remove after running once)
+//                let repository = HealthRepository(context: context)
+//                repository.deleteAllReadings()
+                
                 // Start heart pulse animation
                 withAnimation(Animation.easeInOut(duration: 1.0).repeatForever(autoreverses: true)) {
                     heartPulse = true
                 }
             }
+            
+            .task {
+                // Load Supabase data when view appears
+                await bleManager.fetchSupabaseData()
+            }
+            .refreshable {
+                // Pull-to-refresh functionality
+                await bleManager.fetchSupabaseData()
+            }
+            
         }
     }
     
@@ -132,51 +161,27 @@ struct ConnectionStatusCard: View {
     @ObservedObject var bleManager: BLEManager
     
     var body: some View {
-        VStack(spacing: 12) {
-            // Connection indicator with animation
-            HStack {
-                Circle()
-                    .fill(bleManager.isConnected ? Color.green : Color.red)
-                    .frame(width: 16, height: 16)
-                    .overlay(
-                        // Pulsing ring when connected
-                        Circle()
-                            .stroke(bleManager.isConnected ? Color.green.opacity(0.4) : Color.red.opacity(0.4), lineWidth: 4)
-                            .scaleEffect(bleManager.isConnected ? 1.5 : 1.0)
-                            .opacity(bleManager.isConnected ? 0 : 1)
-                            .animation(
-                                bleManager.isConnected ?
-                                Animation.easeOut(duration: 1.5).repeatForever(autoreverses: false) : .default,
-                                value: bleManager.isConnected
-                            )
-                    )
-                
-                Text(bleManager.isConnected ? "Connected" : "Disconnected")
+        HStack(spacing: 12) {
+            // Status indicator - always green for Supabase
+            Circle()
+                .fill(Color.green)
+                .frame(width: 12, height: 12)
+            
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Connected")
                     .font(.headline)
-                    .foregroundColor(bleManager.isConnected ? .green : .red)
                 
-                Spacer()
-                
-                // Signal strength bars
-                if bleManager.isConnected {
-                    SignalStrengthView(rssi: bleManager.rssi)
-                }
+                Text("ESP32 → Supabase")
+                    .font(.subheadline)
+                    .foregroundColor(.secondary)
             }
             
-            // Device name
-            HStack {
-                Image(systemName: "antenna.radiowaves.left.and.right")
-                    .foregroundColor(.secondary)
-                Text(bleManager.deviceName)
-                    .foregroundColor(.secondary)
-                Spacer()
-            }
-            .font(.subheadline)
+            Spacer()
         }
         .padding()
-        .background(Color(.secondarySystemGroupedBackground))
+        .background(Color(.systemBackground))
         .cornerRadius(12)
-        .shadow(color: Color.black.opacity(0.1), radius: 5, x: 0, y: 2)
+        .shadow(radius: 2)
     }
 }
 

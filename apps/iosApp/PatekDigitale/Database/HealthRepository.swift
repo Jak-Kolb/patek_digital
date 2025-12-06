@@ -93,4 +93,19 @@ class HealthRepository {
             print("Error deleting old readings: \(error)")
         }
     }
+    
+    /// Deletes ALL health readings from CoreData
+    func deleteAllReadings() {
+        let request = NSFetchRequest<NSFetchRequestResult>(entityName: "HealthReading")
+        let deleteRequest = NSBatchDeleteRequest(fetchRequest: request)
+        
+        do {
+            try context.execute(deleteRequest)
+            try context.save()
+            print("✅ Deleted all readings from CoreData")
+        } catch {
+            print("❌ Error deleting all readings: \(error)")
+        }
+    }
+
 }

@@ -25,12 +25,15 @@ class BLEManager: NSObject, ObservableObject, CBCentralManagerDelegate, CBPeriph
     // Health repository for database operations
     private var healthRepository: HealthRepository?
     
+    // Supabase repository for fetching remote data
+    private var supabaseRepository = SupabaseHealthRepository()
+
     // Bluetooth instance & peripheral variables
     var centralManager: CBCentralManager!
     var discoveredPeripheral: CBPeripheral?
     
     // Mock mode for testing without physical device
-    @Published var useMockData = true
+    @Published var useMockData = false
     var mockTimer: Timer?
     
     // CoreData context for saving readings
@@ -571,4 +574,43 @@ class BLEManager: NSObject, ObservableObject, CBCentralManagerDelegate, CBPeriph
         
         print("Generated mock reading: HR=\(heartRate) Steps=\(stepCount) Temp=\(temperature) Battery=\(batteryLevel)%")
     }
+    
+    // MARK - Supabase Data Fetching
+
+    func fetchSupabaseData() async {
+        do {
+            print("🔍 Starting Supabase fetch...")
+            let readings = try await supabaseRepository.fetchRecentReadings(limit: 100)
+            print("📦 Raw response count: \(readings.count)")
+            
+            await MainActor.run {
+                for reading in readings {
+                    guard let repository = healthRepository,
+                          let timestamp = reading.timestamp else { return }
+                    
+                    // Check if this timestamp already exists
+                    let fetchRequest = NSFetchRequest<HealthReading>(entityName: "HealthReading")
+                    fetchRequest.predicate = NSPredicate(format: "timestamp == %@", timestamp as NSDate)
+                    
+                    if let count = try? context?.fetch(fetchRequest).count, count == 0 {
+                        // Only save if it doesn't already exist
+                        repository.saveBatchReading(
+                            timestamp: timestamp,
+                            heartRate: Int16(reading.heart_rate ?? 0),
+                            stepCount: Int32(reading.steps ?? 0),
+                            temperature: (reading.temperature ?? 0.0) * 9/5 + 32,  // Convert C to F
+                            batteryLevel: 100,
+                            qualityFlags: QualityFlags(rawValue: 0)
+                        )
+                    }
+                }
+                print("✅ Processed \(readings.count) readings from Supabase")
+            }
+        } catch {
+            print("❌ Error: \(error)")
+        }
+    }
+
+
+
 }
