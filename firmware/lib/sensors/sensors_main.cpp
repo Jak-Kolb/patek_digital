@@ -12,6 +12,8 @@
 #include "sensors.h"
 #include "app_config.h"
 #include <SparkFun_BMI270_Arduino_Library.h>
+#include "MAX30105.h"
+#include "heartRate.h"
 #include "ringbuf/reg_buffer.h"
 
 // Addresses (adapted from sensors_demo.cpp)
@@ -78,75 +80,41 @@ static ImuSample bmi270_read() {
   return s;
 }
 
-// --- MAX30102 (configure, drain FIFO like sensors_demo) ---
-static constexpr uint8_t MAX30102_REG_INT_STATUS_1 = 0x00;
-static constexpr uint8_t MAX30102_REG_INT_STATUS_2 = 0x01;
-static constexpr uint8_t MAX30102_REG_INT_ENABLE_1 = 0x02;
-static constexpr uint8_t MAX30102_REG_INT_ENABLE_2 = 0x03;
-static constexpr uint8_t MAX30102_REG_FIFO_WR_PTR  = 0x04;
-static constexpr uint8_t MAX30102_REG_OVF_COUNTER  = 0x05;
-static constexpr uint8_t MAX30102_REG_FIFO_RD_PTR  = 0x06;
-static constexpr uint8_t MAX30102_REG_FIFO_DATA    = 0x07;
-static constexpr uint8_t MAX30102_REG_FIFO_CONFIG  = 0x08;
-static constexpr uint8_t MAX30102_REG_MODE_CONFIG  = 0x09;
-static constexpr uint8_t MAX30102_REG_SPO2_CONFIG  = 0x0A;
-static constexpr uint8_t MAX30102_REG_LED1_PA      = 0x0C;
-static constexpr uint8_t MAX30102_REG_LED2_PA      = 0x0D;
-static constexpr uint8_t MAX30102_REG_PART_ID      = 0xFF;
+// --- MAX30102 (using SparkFun Library) ---
+static MAX30105 particleSensor;
+
+const byte RATE_SIZE = 4; //Increase this for more averaging. 4 is good.
+byte rates[RATE_SIZE]; //Array of heart rates
+byte rateSpot = 0;
+long lastBeat = 0; //Time at which the last beat occurred
+
+float beatsPerMinute;
+int beatAvg;
 
 static bool max30102_begin() {
-  if (!i2c_ping(MAX30102_ADDR)) { Serial.println("MAX30102: not found"); return false; }
-  int part = i2c_read8(MAX30102_ADDR, MAX30102_REG_PART_ID);
-  if (part != 0x15) { Serial.printf("MAX30102: unexpected PART_ID=0x%02X\n", part); return false; }
-  Serial.printf("MAX30102: found PART_ID=0x%02X\n", part);
-  // Reset & wait
-  (void)i2c_write8(MAX30102_ADDR, MAX30102_REG_MODE_CONFIG, 0x40);
-  uint32_t t0 = millis();
-  while (millis() - t0 < 200) {
-    int m = i2c_read8(MAX30102_ADDR, MAX30102_REG_MODE_CONFIG);
-    if (m >= 0 && (m & 0x40) == 0) break;
-    delay(2);
+  // Initialize sensor
+  if (!particleSensor.begin(Wire, I2C_SPEED_FAST)) { // Use default I2C port, 400kHz speed
+    Serial.println("MAX30102: not found");
+    return false;
   }
-  // Clear status
-  (void)i2c_read8(MAX30102_ADDR, MAX30102_REG_INT_STATUS_1);
-  (void)i2c_read8(MAX30102_ADDR, MAX30102_REG_INT_STATUS_2);
-  // Reset FIFO pointers
-  (void)i2c_write8(MAX30102_ADDR, MAX30102_REG_FIFO_WR_PTR, 0x00);
-  (void)i2c_write8(MAX30102_ADDR, MAX30102_REG_OVF_COUNTER, 0x00);
-  (void)i2c_write8(MAX30102_ADDR, MAX30102_REG_FIFO_RD_PTR, 0x00);
-  // FIFO config: avg=4, rollover enable, threshold 0x0F
-  (void)i2c_write8(MAX30102_ADDR, MAX30102_REG_FIFO_CONFIG, 0b01010000 | 0x0F);
-  // SpO2 config: ADC range 4096nA, ~100Hz sample rate, pulse width 411us
-  (void)i2c_write8(MAX30102_ADDR, MAX30102_REG_SPO2_CONFIG, 0b11001111);
-  // LED currents (slightly higher for better SNR)
-  (void)i2c_write8(MAX30102_ADDR, MAX30102_REG_LED1_PA, 0x28);
-  (void)i2c_write8(MAX30102_ADDR, MAX30102_REG_LED2_PA, 0x28);
-  // Enable PPG ready interrupt (not strictly used but set for completeness)
-  (void)i2c_write8(MAX30102_ADDR, MAX30102_REG_INT_ENABLE_1, 0x40);
-  // Mode: SpO2 (RED+IR)
-  (void)i2c_write8(MAX30102_ADDR, MAX30102_REG_MODE_CONFIG, 0x03);
-  delay(50);
+
+  // Setup with optimal settings for heart rate
+  byte ledBrightness = 0x1F; // Options: 0=Off to 255=50mA. 0x1F (approx 6.4mA) is a good starting point
+  byte sampleAverage = 4;    // Options: 1, 2, 4, 8, 16, 32
+  byte ledMode = 3;          // Options: 1 = Red only, 2 = Red + DC, 3 = Red + IR
+  int sampleRate = 100;      // Options: 50, 100, 200, 400, 800, 1000, 1600, 3200
+  int pulseWidth = 411;      // Options: 69, 118, 215, 411
+  int adcRange = 4096;       // Options: 2048, 4096, 8192, 16384
+
+  particleSensor.setup(ledBrightness, sampleAverage, ledMode, sampleRate, pulseWidth, adcRange);
+  particleSensor.setPulseAmplitudeRed(ledBrightness);
+  particleSensor.setPulseAmplitudeGreen(0); // Turn off Green LED
+  
   Serial.println("MAX30102 ready");
   return true;
 }
-struct PpgSample { uint32_t red; uint32_t ir; bool ok; };
-static PpgSample max30102_readOne() {
-  PpgSample s{0,0,false};
-  int wr = i2c_read8(MAX30102_ADDR, MAX30102_REG_FIFO_WR_PTR);
-  int rd = i2c_read8(MAX30102_ADDR, MAX30102_REG_FIFO_RD_PTR);
-  if (wr < 0 || rd < 0) return s;
-  uint8_t available = (uint8_t)((wr - rd) & 0x1F);
-  if (!available) return s;
-  if (available > 32) available = 32; // safety cap
-  for (uint8_t i = 0; i < available; ++i) {
-    uint8_t data[6];
-    if (i2c_readN(MAX30102_ADDR, MAX30102_REG_FIFO_DATA, data, 6) != 6) { s.ok = false; return s; }
-    uint32_t red = ((uint32_t)(data[0] & 0x03) << 16) | ((uint32_t)data[1] << 8) | data[2];
-    uint32_t ir  = ((uint32_t)(data[3] & 0x03) << 16) | ((uint32_t)data[4] << 8) | data[5];
-    s.red = red; s.ir = ir; s.ok = true; // keep last
-  }
-  return s;
-}
+
+
 
 // --- MAX30205 ---
 static bool max30205_ok = false;
@@ -171,10 +139,7 @@ static hw_timer_t* tTemp = nullptr;
 static TaskHandle_t g_sensorTaskHandle = nullptr;
 
 // --- ISR flags ---
-static volatile bool imuDue  = false;
-static volatile bool ppgDue  = false;
-static volatile bool tempDue = false; // also marks second boundary
-static volatile bool secondFlag = false;
+// Removed volatile flags in favor of direct task notifications
 
 // --- Accumulators for 1s window ---
 static uint32_t imuCount = 0; static double axSum=0, aySum=0, azSum=0, gxSum=0, gySum=0, gzSum=0, imuTempSumF=0;
@@ -190,47 +155,46 @@ static uint32_t halfWindowStartMs = 0; // initialized in setup
 // --- Ring buffer target ---
 static reg_buffer::SampleRingBuffer* g_targetBuffer = nullptr;
 
-// --- Barebones heart rate estimation state ---
-static float hrBpm = 0.0f;            // latest BPM (unsmoothed)
-static uint32_t lastBeatMs = 0;       // timestamp of last beat (ms)
+// --- Heart rate estimation state ---
+static void updateHeartRate(long irValue) {
+  if (checkForBeat(irValue) == true) {
+    //We sensed a beat!
+    long delta = millis() - lastBeat;
+    lastBeat = millis();
 
-// Very simple beat detection: baseline + relative threshold, rising edge, refractory.
-static bool simpleBeatDetect(uint32_t ir)
-{
-  static float baseline = 0.0f;                // adaptive DC baseline
-  if (baseline == 0.0f) baseline = (float)ir;   // initialize to first reading
-  // Faster adaptation reduces diff amplitude (fewer false peaks at rest)
-  baseline = 0.98f * baseline + 0.02f * ir;    // ~50 sample time constant (@55Hz ≈0.9s)
-  float diff = (float)ir - baseline;
-  float threshold = baseline * 0.004f;         // keep same relative threshold
-  static bool prevAbove = false;
-  uint32_t now = millis();
-  const uint32_t REFRACTORY_MS = 500;          // ignore beats faster than 120 BPM
-  bool rising = (diff > threshold) && !prevAbove;
-  bool beat = false;
-  if (rising && (now - lastBeatMs) > REFRACTORY_MS) {
-    beat = true;
-    uint32_t delta = now - lastBeatMs;
-    lastBeatMs = now;
-    if (delta > 600 && delta < 2000) {         // plausible 30-100 BPM
-      hrBpm = 60000.0f / (float)delta;
+    beatsPerMinute = 60 / (delta / 1000.0);
+
+    if (beatsPerMinute < 255 && beatsPerMinute > 20) {
+      rates[rateSpot++] = (byte)beatsPerMinute; //Store this reading in the array
+      rateSpot %= RATE_SIZE; //Wrap variable
+
+      //Take average of readings
+      beatAvg = 0;
+      for (byte x = 0; x < RATE_SIZE; x++)
+        beatAvg += rates[x];
+      beatAvg /= RATE_SIZE;
     }
   }
-  prevAbove = diff > threshold;
-  return beat;
 }
 
+static const uint32_t EVT_IMU  = (1 << 0);
+static const uint32_t EVT_PPG  = (1 << 1);
+static const uint32_t EVT_TEMP = (1 << 2);
+
 void IRAM_ATTR onImuTimer()  { 
-  imuDue  = true; 
-  if (g_sensorTaskHandle) vTaskNotifyGiveFromISR(g_sensorTaskHandle, NULL);
+  BaseType_t xHigherPriorityTaskWoken = pdFALSE;
+  if (g_sensorTaskHandle) xTaskNotifyFromISR(g_sensorTaskHandle, EVT_IMU, eSetBits, &xHigherPriorityTaskWoken);
+  if (xHigherPriorityTaskWoken) portYIELD_FROM_ISR();
 }
 void IRAM_ATTR onPpgTimer()  { 
-  ppgDue  = true; 
-  if (g_sensorTaskHandle) vTaskNotifyGiveFromISR(g_sensorTaskHandle, NULL);
+  BaseType_t xHigherPriorityTaskWoken = pdFALSE;
+  if (g_sensorTaskHandle) xTaskNotifyFromISR(g_sensorTaskHandle, EVT_PPG, eSetBits, &xHigherPriorityTaskWoken);
+  if (xHigherPriorityTaskWoken) portYIELD_FROM_ISR();
 }
 void IRAM_ATTR onTempTimer() { 
-  tempDue = true; secondFlag = true; 
-  if (g_sensorTaskHandle) vTaskNotifyGiveFromISR(g_sensorTaskHandle, NULL);
+  BaseType_t xHigherPriorityTaskWoken = pdFALSE;
+  if (g_sensorTaskHandle) xTaskNotifyFromISR(g_sensorTaskHandle, EVT_TEMP, eSetBits, &xHigherPriorityTaskWoken);
+  if (xHigherPriorityTaskWoken) portYIELD_FROM_ISR();
 }
 
 static hw_timer_t* setupTimer(uint8_t id, uint16_t divider, uint64_t periodUs, void (*isr)()) {
@@ -279,7 +243,7 @@ static void sampleImu() {
     rs.gx = (reg_buffer::float16)s.gx;
     rs.gy = (reg_buffer::float16)s.gy;
     rs.gz = (reg_buffer::float16)s.gz;
-    rs.hr_bpm = (reg_buffer::float16)(hrBpm > 0 ? hrBpm : 0);
+    rs.hr_bpm = (reg_buffer::float16)(beatAvg > 0 ? beatAvg : 0);
     rs.temp_c = (reg_buffer::float16)lastBodyTempC;
     
     const time_t t_now = time(nullptr);
@@ -299,12 +263,24 @@ static void sampleImu() {
   if (!isnan(s.tempC)) imuTempSumF += (s.tempC * 1.8 + 32.0);
   imuCount++;
 }
+
 static void samplePpg() {
-  PpgSample p = max30102_readOne();
-  if (!p.ok) return;
-  redSum += p.red; irSum += p.ir; ppgCount++;
-  (void)simpleBeatDetect(p.ir); // updates hrBpm internally
+  particleSensor.check(); // Check the sensor, read up to 4 samples
+
+  while (particleSensor.available()) {
+    uint32_t ir = particleSensor.getFIFOIR();
+    uint32_t red = particleSensor.getFIFORed();
+    
+    redSum += red; 
+    irSum += ir; 
+    ppgCount++;
+    
+    updateHeartRate(ir); // updates beatAvg internally
+    
+    particleSensor.nextSample(); // Move to next sample
+  }
 }
+
 static void sampleTemp() {
   float c; if (!max30205_readTemp(c)) return; 
   lastBodyTempC = c;
@@ -312,17 +288,21 @@ static void sampleTemp() {
 }
 
 static void sensorsTask(void* arg) {
+  uint32_t events;
   while(true) {
-    ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+    // Wait for notification bits
+    xTaskNotifyWait(0, ULONG_MAX, &events, portMAX_DELAY);
 
-    // Service due flags (keep ISRs minimal)
-    if (imuDue) { imuDue = false; sampleImu(); }
-    if (ppgDue) { ppgDue = false; samplePpg(); }
-    if (tempDue) { tempDue = false; sampleTemp(); }
-
-    if (secondFlag) {
-      secondFlag = false;
-      // Compute averages
+    if (events & EVT_IMU) {
+      sampleImu();
+    }
+    if (events & EVT_PPG) {
+      samplePpg();
+    }
+    if (events & EVT_TEMP) {
+      sampleTemp();
+      
+      // Compute averages (triggered by 1Hz temp timer)
       double axAvg = imuCount ? axSum / imuCount : NAN;
       double ayAvg = imuCount ? aySum / imuCount : NAN;
       double azAvg = imuCount ? azSum / imuCount : NAN;
@@ -339,7 +319,8 @@ static void sensorsTask(void* arg) {
       if (!isnan(imuTempFAvg)) Serial.printf(" imuT=%.1fF", imuTempFAvg);
       Serial.print("\n");
       Serial.printf("1s AVG PPG at sample rate %uHz (target 25) RED=%.0f IR=%.0f\n", ppgCount, redAvg, irAvg);
-      Serial.printf("HR=%.1f BPM\n", hrBpm);
+      Serial.printf("HR=%d BPM (Avg)\n", beatAvg);
+      Serial.printf("HR=%.1f BPM (Recent)\n", beatsPerMinute);
       if (!isnan(bodyTCAvg)) {
         Serial.printf("1s AVG BodyTemp at sample rate %uHz: %.2fC (%.2fF)\n", tempCount, bodyTCAvg, bodyTFAvg);
       } else {
