@@ -221,7 +221,7 @@ void sensors_setup(reg_buffer::SampleRingBuffer* buffer) {
   // Configure timers: APB 80MHz / divider 80 = 1MHz tick
   // Target 25 Hz = 40000 us
   tImu  = setupTimer(0, 80, 40000,    onImuTimer);   // 25 Hz
-  tPpg  = setupTimer(1, 80, 40000,    onPpgTimer);   // 25 Hz
+  tPpg  = setupTimer(1, 80, 10000,    onPpgTimer);   // 100 Hz
   tTemp = setupTimer(2, 80, 1000000,  onTempTimer);  // 1 Hz
   halfWindowStartMs = millis();
 
@@ -229,6 +229,30 @@ void sensors_setup(reg_buffer::SampleRingBuffer* buffer) {
 }
 
 static float lastBodyTempC = 0.0f;
+
+// --- HR Median Buffer ---
+static int hrBuffer[4] = {0};
+static uint8_t hrBufferIdx = 0;
+
+static void pushHrValue(int val) {
+    hrBuffer[hrBufferIdx] = val;
+    hrBufferIdx = (hrBufferIdx + 1) % 4;
+}
+
+static int getMedianHr() {
+    int sorted[4];
+    memcpy(sorted, hrBuffer, sizeof(sorted));
+    // Simple bubble sort for 4 elements
+    for(int i=0; i<3; i++) {
+        for(int j=i+1; j<4; j++) {
+            if(sorted[j] < sorted[i]) {
+                int t = sorted[i]; sorted[i] = sorted[j]; sorted[j] = t;
+            }
+        }
+    }
+    // Median of 4: average of index 1 and 2
+    return (sorted[1] + sorted[2]) / 2;
+}
 
 static void sampleImu() {
   ImuSample s = bmi270_read();
@@ -243,7 +267,7 @@ static void sampleImu() {
     rs.gx = (reg_buffer::float16)s.gx;
     rs.gy = (reg_buffer::float16)s.gy;
     rs.gz = (reg_buffer::float16)s.gz;
-    rs.hr_bpm = (reg_buffer::float16)(beatAvg > 0 ? beatAvg : 0);
+    rs.hr_bpm = (reg_buffer::float16)getMedianHr();
     rs.temp_c = (reg_buffer::float16)lastBodyTempC;
     
     const time_t t_now = time(nullptr);
@@ -276,6 +300,7 @@ static void samplePpg() {
     ppgCount++;
     
     updateHeartRate(ir); // updates beatAvg internally
+    pushHrValue(beatAvg);
     
     particleSensor.nextSample(); // Move to next sample
   }
