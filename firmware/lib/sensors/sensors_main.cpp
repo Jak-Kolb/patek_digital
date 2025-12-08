@@ -12,6 +12,7 @@
 #include "sensors.h"
 #include "app_config.h"
 #include <SparkFun_BMI270_Arduino_Library.h>
+#undef I2C_BUFFER_LENGTH
 #include "MAX30105.h"
 #include "heartRate.h"
 #include "ringbuf/reg_buffer.h"
@@ -91,6 +92,14 @@ long lastBeat = 0; //Time at which the last beat occurred
 float beatsPerMinute;
 int beatAvg;
 
+// --- HR Median Buffer ---
+static int hrBuffer[4] = {0};
+static uint8_t hrBufferIdx = 0;
+
+// Forward declarations
+static void pushHrValue(int val);
+static int getMedianHr();
+
 static bool max30102_begin() {
   // Initialize sensor
   if (!particleSensor.begin(Wire, I2C_SPEED_FAST)) { // Use default I2C port, 400kHz speed
@@ -102,7 +111,7 @@ static bool max30102_begin() {
   byte ledBrightness = 0x1F; // Options: 0=Off to 255=50mA. 0x1F (approx 6.4mA) is a good starting point
   byte sampleAverage = 4;    // Options: 1, 2, 4, 8, 16, 32
   byte ledMode = 3;          // Options: 1 = Red only, 2 = Red + DC, 3 = Red + IR
-  int sampleRate = 100;      // Options: 50, 100, 200, 400, 800, 1000, 1600, 3200
+  int sampleRate = 1000;      // Options: 50, 100, 200, 400, 800, 1000, 1600, 3200
   int pulseWidth = 411;      // Options: 69, 118, 215, 411
   int adcRange = 4096;       // Options: 2048, 4096, 8192, 16384
 
@@ -165,14 +174,24 @@ static void updateHeartRate(long irValue) {
     beatsPerMinute = 60 / (delta / 1000.0);
 
     if (beatsPerMinute < 255 && beatsPerMinute > 20) {
-      rates[rateSpot++] = (byte)beatsPerMinute; //Store this reading in the array
-      rateSpot %= RATE_SIZE; //Wrap variable
+      // Push raw BPM to median buffer first
+      pushHrValue((int)beatsPerMinute);
+      
+      // Only update average once every 4 raw samples (when median buffer wraps)
+      if (hrBufferIdx == 0) {
+        // Get median of last 4 raw BPMs
+        int medianBpm = getMedianHr();
 
-      //Take average of readings
-      beatAvg = 0;
-      for (byte x = 0; x < RATE_SIZE; x++)
-        beatAvg += rates[x];
-      beatAvg /= RATE_SIZE;
+        // Add median to average buffer
+        rates[rateSpot++] = (byte)medianBpm; 
+        rateSpot %= RATE_SIZE; 
+
+        //Take average of readings
+        beatAvg = 0;
+        for (byte x = 0; x < RATE_SIZE; x++)
+          beatAvg += rates[x];
+        beatAvg /= RATE_SIZE;
+      }
     }
   }
 }
@@ -229,10 +248,6 @@ void sensors_setup(reg_buffer::SampleRingBuffer* buffer) {
 }
 
 static float lastBodyTempC = 0.0f;
-
-// --- HR Median Buffer ---
-static int hrBuffer[4] = {0};
-static uint8_t hrBufferIdx = 0;
 
 static void pushHrValue(int val) {
     hrBuffer[hrBufferIdx] = val;
@@ -300,7 +315,6 @@ static void samplePpg() {
     ppgCount++;
     
     updateHeartRate(ir); // updates beatAvg internally
-    pushHrValue(beatAvg);
     
     particleSensor.nextSample(); // Move to next sample
   }
@@ -343,7 +357,7 @@ static void sensorsTask(void* arg) {
       Serial.printf("1s AVG IMU at sample rate %uHz (target 25) a[g]=[% .3f % .3f % .3f] g[dps]=[% .2f % .2f % .2f]", imuCount, axAvg, ayAvg, azAvg, gxAvg, gyAvg, gzAvg);
       if (!isnan(imuTempFAvg)) Serial.printf(" imuT=%.1fF", imuTempFAvg);
       Serial.print("\n");
-      Serial.printf("1s AVG PPG at sample rate %uHz (target 25) RED=%.0f IR=%.0f\n", ppgCount, redAvg, irAvg);
+      Serial.printf("1s AVG PPG at sample rate %uHz (target 100) RED=%.0f IR=%.0f\n", ppgCount, redAvg, irAvg);
       Serial.printf("HR=%d BPM (Avg)\n", beatAvg);
       Serial.printf("HR=%.1f BPM (Recent)\n", beatsPerMinute);
       if (!isnan(bodyTCAvg)) {
