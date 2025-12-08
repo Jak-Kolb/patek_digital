@@ -2,10 +2,53 @@
 // HealthReadingTLV.swift
 // PatekDigitale
 //
-// Created by vishalm3416 on 10/14/25.
+// Updated to match Firmware/Python protocol
 //
 
 import Foundation
+
+// Structure matching the firmware's consolidated record
+struct FirmwareRecord {
+    let heartRate: Double
+    let temperature: Double
+    let stepCount: Int
+    let timestamp: Date
+}
+
+class BLEProtocolParser {
+    // Protocol Markers
+    static let START_MARKER: UInt8 = 0x01
+    static let DATA_MARKER: UInt8 = 0x02
+    static let END_MARKER: UInt8   = 0x03
+    
+    // Struct size: 2 (HR) + 2 (Temp) + 2 (Steps) + 4 (Time) = 10 bytes
+    static let RECORD_SIZE = 10
+    
+    static func parseRecord(_ data: Data) -> FirmwareRecord? {
+        // Data payload starts after the marker byte, so we expect exactly RECORD_SIZE bytes passed here
+        guard data.count >= RECORD_SIZE else { return nil }
+        
+        // Parse Little Endian values
+        // 1. Heart Rate (UInt16) - avg_hr_x10
+        let hrRaw = data.subdata(in: 0..<2).withUnsafeBytes { $0.load(as: UInt16.self) }
+        
+        // 2. Temperature (Int16) - avg_temp_x100
+        let tempRaw = data.subdata(in: 2..<4).withUnsafeBytes { $0.load(as: Int16.self) }
+        
+        // 3. Step Count (UInt16)
+        let stepsRaw = data.subdata(in: 4..<6).withUnsafeBytes { $0.load(as: UInt16.self) }
+        
+        // 4. Timestamp (UInt32)
+        let timeRaw = data.subdata(in: 6..<10).withUnsafeBytes { $0.load(as: UInt32.self) }
+        
+        return FirmwareRecord(
+            heartRate: Double(hrRaw) / 10.0,
+            temperature: Double(tempRaw) / 100.0,
+            stepCount: Int(stepsRaw),
+            timestamp: Date(timeIntervalSince1970: TimeInterval(timeRaw))
+        )
+    }
+}
 
 // Quality flags for health reading reliability assessment
 struct QualityFlags: OptionSet {
@@ -32,100 +75,5 @@ struct QualityFlags: OptionSet {
         if contains(.sensorError) { issues.append("Sensor Error") }
         if contains(.batteryLow) { issues.append("Low Battery") }
         return issues.isEmpty ? "Good" : issues.joined(separator: ", ")
-    }
-}
-
-// Type-Length-Value health reading from ESP32
-struct HealthReadingTLV: Codable {
-    let type: UInt8
-    let length: UInt8
-    let value: Data
-    
-    // Decodes the raw value based on type identifier
-    func decodedValue() -> Any? {
-        guard value.count >= Int(length) else { return nil }
-        
-        switch type {
-        case 0x01: // Heart Rate (16-bit integer, 0-255 bpm)
-            return value.withUnsafeBytes { $0.load(as: Int16.self) }
-            
-        case 0x02: // Step Count (32-bit integer, accumulated steps)
-            return value.withUnsafeBytes { $0.load(as: Int32.self) }
-            
-        case 0x03: // Temperature (64-bit double, degrees Fahrenheit)
-            return value.withUnsafeBytes { $0.load(as: Double.self) }
-            
-        case 0x04: // Battery Level (16-bit integer, 0-100%)
-            return value.withUnsafeBytes { $0.load(as: Int16.self) }
-            
-        case 0x05: // Quality Flags (8-bit bitmask)
-            return value.withUnsafeBytes { $0.load(as: UInt8.self) }
-            
-        default:
-            return nil
-        }
-    }
-}
-
-// Efficient TLV parser for ESP32 BLE notifications
-class TLVParser {
-    static func parse(_ data: Data) -> [HealthReadingTLV] {
-        var readings: [HealthReadingTLV] = []
-        var offset = 0
-        
-        while offset + 2 <= data.count { // Need at least Type + Length bytes
-            let type = data[offset]
-            let length = data[offset + 1]
-            
-            offset += 2
-            
-            // Validate we have enough remaining bytes for the value
-            guard offset + Int(length) <= data.count else {
-                print("TLV parsing error: insufficient data for value")
-                break
-            }
-            
-            let value = data.subdata(in: offset..<offset + Int(length))
-            
-            let tlv = HealthReadingTLV(type: type, length: length, value: value)
-            readings.append(tlv)
-            
-            offset += Int(length)
-        }
-        
-        return readings
-    }
-    
-    // Batches multiple TLV readings into a single CoreData transaction
-    static func batchProcess(_ readings: [HealthReadingTLV],
-                            timestamp: Date,
-                            repository: HealthRepository) {
- 
-        var heartRate: Int16?
-        var stepCount: Int32?
-        var temperature: Double?
-        var batteryLevel: Int16?
-        var qualityFlags: UInt8 = 0
-        
-        for tlv in readings {
-            switch tlv.type {
-            case 0x01: heartRate = tlv.decodedValue() as? Int16
-            case 0x02: stepCount = tlv.decodedValue() as? Int32
-            case 0x03: temperature = tlv.decodedValue() as? Double
-            case 0x04: batteryLevel = tlv.decodedValue() as? Int16
-            case 0x05: qualityFlags = tlv.decodedValue() as? UInt8 ?? 0
-            default: break
-            }
-        }
-        
-        // Save as single CoreData entry
-        repository.saveBatchReading(
-            timestamp: timestamp,
-            heartRate: heartRate ?? 0,
-            stepCount: stepCount ?? 0,
-            temperature: temperature ?? 0.0,
-            batteryLevel: batteryLevel ?? 0,
-            qualityFlags: QualityFlags(rawValue: qualityFlags)
-        )
     }
 }

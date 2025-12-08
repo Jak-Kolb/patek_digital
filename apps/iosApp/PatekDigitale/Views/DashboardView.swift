@@ -154,7 +154,7 @@ struct DashboardView: View {
     }
 }
 
-// MARK: - Connection Status Card
+// MARK: - Connection StatusCard
 
 /// Card displaying connection status with prominent indicator
 struct ConnectionStatusCard: View {
@@ -162,21 +162,37 @@ struct ConnectionStatusCard: View {
     
     var body: some View {
         HStack(spacing: 12) {
-            // Status indicator - always green for Supabase
+            // Status indicator
             Circle()
-                .fill(Color.green)
+                .fill(bleManager.isConnected ? Color.green : Color.red)
                 .frame(width: 12, height: 12)
             
             VStack(alignment: .leading, spacing: 4) {
-                Text("Connected")
+                Text(bleManager.isConnected ? "Connected" : "Disconnected")
                     .font(.headline)
                 
-                Text("ESP32 → Supabase")
+                Text(bleManager.isConnected ? "ESP32 → Supabase" : "Waiting for device...")
                     .font(.subheadline)
                     .foregroundColor(.secondary)
             }
             
             Spacer()
+            
+            // Sync Button
+            if bleManager.isConnected {
+                Button(action: {
+                    bleManager.requestDataTransfer()
+                }) {
+                    HStack {
+                        Image(systemName: "arrow.triangle.2.circlepath")
+                        Text("Sync")
+                    }
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 6)
+                    .background(Color.blue.opacity(0.1))
+                    .cornerRadius(8)
+                }
+            }
         }
         .padding()
         .background(Color(.systemBackground))
@@ -456,7 +472,7 @@ struct NoDataView: View {
                 .font(.title2)
                 .fontWeight(.semibold)
             
-            Text("Connect to your device or enable Mock Data in Settings to see your health metrics.")
+            Text("Connect to your device to see your health metrics.")
                 .font(.subheadline)
                 .foregroundColor(.secondary)
                 .multilineTextAlignment(.center)

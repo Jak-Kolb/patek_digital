@@ -12,20 +12,20 @@ struct SettingsView: View {
     @ObservedObject var bleManager: BLEManager
     
     // Local state for configuration UI
-    @State private var samplingInterval: Double
-    @State private var burstLength: Double
     @State private var notificationsEnabled: Bool
     @State private var connectionTimeout: Double
     
     @State private var showSaveAlert = false
+    
+    // User Stats Persistence
+    @AppStorage("userHeightInches") private var userHeightInches: Double = 70.0
+    @AppStorage("userWeightLbs") private var userWeightLbs: Double = 170.0
     
     init(bleManager: BLEManager) {
         self.bleManager = bleManager
         
         // Initialize state from current configuration
         let config = bleManager.configuration
-        _samplingInterval = State(initialValue: Double(config.samplingInterval))
-        _burstLength = State(initialValue: Double(config.heartRateBurstLength))
         _notificationsEnabled = State(initialValue: config.notificationsEnabled)
         _connectionTimeout = State(initialValue: Double(config.connectionTimeout))
     }
@@ -101,37 +101,39 @@ struct SettingsView: View {
                     }
                 }
                 
+                // MARK: - User Profile Section
+                Section(header: Text("User Profile")) {
+                    HStack {
+                        Text("Height (inches)")
+                        Spacer()
+                        TextField("Height", value: $userHeightInches, formatter: NumberFormatter())
+                            .keyboardType(.decimalPad)
+                            .multilineTextAlignment(.trailing)
+                            .frame(width: 80)
+                    }
+                    
+                    HStack {
+                        Text("Weight (lbs)")
+                        Spacer()
+                        TextField("Weight", value: $userWeightLbs, formatter: NumberFormatter())
+                            .keyboardType(.decimalPad)
+                            .multilineTextAlignment(.trailing)
+                            .frame(width: 80)
+                    }
+                    
+                    // Display calculated stride length for info
+                    HStack {
+                        Text("Est. Stride Length")
+                        Spacer()
+                        let strideFt = (userHeightInches / 12.0) * 0.43
+                        Text(String(format: "%.2f ft", strideFt))
+                            .foregroundColor(.secondary)
+                    }
+                }
+                
                 // MARK: - Device Configuration Section
                 Section(header: Text("Device Configuration"),
                        footer: Text("Configuration will be written to the device when you tap Save")) {
-                    
-                    // Sampling interval slider (100-5000ms)
-                    VStack(alignment: .leading) {
-                        Text("Sampling Interval: \(Int(samplingInterval))ms")
-                            .font(.headline)
-                        Slider(value: $samplingInterval, in: 100...5000, step: 100)
-                        Text("How often the device takes readings. Lower = more frequent updates but higher battery drain.")
-                            .font(.caption)
-                            .foregroundColor(.secondary)
-                    }
-                    .padding(.vertical, 4)
-                    
-                    // Heart rate burst length stepper (1-10 samples)
-                    VStack(alignment: .leading) {
-                        HStack {
-                            Text("HR Burst Length:")
-                                .font(.headline)
-                            Spacer()
-                            Stepper("\(Int(burstLength)) samples",
-                                   value: $burstLength,
-                                   in: 1...10,
-                                   step: 1)
-                        }
-                        Text("Number of consecutive heart rate readings to average for accuracy.")
-                            .font(.caption)
-                            .foregroundColor(.secondary)
-                    }
-                    .padding(.vertical, 4)
                     
                     // Connection timeout stepper (5-60 seconds)
                     VStack(alignment: .leading) {
@@ -188,24 +190,6 @@ struct SettingsView: View {
                 
                 // MARK: - Advanced Settings Section
                 Section(header: Text("Advanced")) {
-                    // Mock data toggle for testing
-                    Toggle(isOn: $bleManager.useMockData) {
-                        VStack(alignment: .leading) {
-                            Text("Mock Data Mode")
-                                .font(.headline)
-                            Text("Generate simulated data for testing")
-                                .font(.caption)
-                                .foregroundColor(.secondary)
-                        }
-                    }
-                    .onChange(of: bleManager.useMockData) {
-                        if bleManager.useMockData {
-                            bleManager.startMockDataGeneration()
-                        } else {
-                            bleManager.stopMockDataGeneration()
-                        }
-                    }
-                    
                     // Read configuration from device
                     Button(action: {
                         bleManager.readConfiguration()
@@ -232,8 +216,6 @@ struct SettingsView: View {
     // Saves current UI state to device configuration
     private func saveConfiguration() {
         var config = DeviceConfiguration()
-        config.samplingInterval = Int(samplingInterval)
-        config.heartRateBurstLength = Int(burstLength)
         config.notificationsEnabled = notificationsEnabled
         config.connectionTimeout = Int(connectionTimeout)
         

@@ -32,10 +32,6 @@ class BLEManager: NSObject, ObservableObject, CBCentralManagerDelegate, CBPeriph
     var centralManager: CBCentralManager!
     var discoveredPeripheral: CBPeripheral?
     
-    // Mock mode for testing without physical device
-    @Published var useMockData = false
-    var mockTimer: Timer?
-    
     // CoreData context for saving readings
     var context: NSManagedObjectContext?
     
@@ -60,15 +56,11 @@ class BLEManager: NSObject, ObservableObject, CBCentralManagerDelegate, CBPeriph
     // MARK: - BLE UUIDs
     
     // Service UUID for health data
-    let espServiceUUID = CBUUID(string: "00000000-0000-0000-0000-000000000001")
+    let espServiceUUID = CBUUID(string: "12345678-1234-5678-1234-56789abc0000")
     
     // Characteristic UUIDs
-    let configUUID = CBUUID(string: "00000000-0000-0000-0000-000000000006")      // Config write/read
-    let heartRateUUID = CBUUID(string: "00000000-0000-0000-0000-000000000002")   // HR notifications
-    let stepCountUUID = CBUUID(string: "00000000-0000-0000-0000-000000000003")   // Steps notifications
-    let temperatureUUID = CBUUID(string: "00000000-0000-0000-0000-000000000004") // Temp notifications
-    let batteryUUID = CBUUID(string: "00000000-0000-0000-0000-000000000005")     // Battery notifications
-    let dataStreamUUID = CBUUID(string: "00000000-0000-0000-0000-000000000007")  // Combined TLV stream
+    let dataStreamUUID = CBUUID(string: "12345678-1234-5678-1234-56789abc1001")  // Data stream (Notify)
+    let controlUUID = CBUUID(string: "12345678-1234-5678-1234-56789abc1002")     // Control (Write)
     
     // MARK: - State Restoration Keys
     
@@ -80,6 +72,9 @@ class BLEManager: NSObject, ObservableObject, CBCentralManagerDelegate, CBPeriph
     
     // Track latency for <10ms requirement
     private var lastNotificationTime: Date?
+    
+    // Buffer for Supabase upload
+    private var sessionReadings: [FirmwareRecord] = []
     
     // MARK: - Initialization
     
@@ -117,6 +112,26 @@ class BLEManager: NSObject, ObservableObject, CBCentralManagerDelegate, CBPeriph
         )
         
         print("Started scanning for ESP32 device...")
+    }
+    
+    // Manually request data transfer from device
+    func requestDataTransfer() {
+        guard let peripheral = discoveredPeripheral, isConnected else {
+            print("Cannot request transfer: Device not connected")
+            return
+        }
+        
+        guard let service = peripheral.services?.first(where: { $0.uuid == espServiceUUID }),
+              let characteristic = service.characteristics?.first(where: { $0.uuid == controlUUID }) else {
+            print("Cannot request transfer: Control characteristic not found")
+            return
+        }
+        
+        let sendCommand = "SEND"
+        if let data = sendCommand.data(using: .ascii) {
+            peripheral.writeValue(data, for: characteristic, type: .withoutResponse)
+            print("Manually sent SEND command")
+        }
     }
     
     // Manually stop scanning
@@ -181,53 +196,13 @@ class BLEManager: NSObject, ObservableObject, CBCentralManagerDelegate, CBPeriph
     
     // MARK: - Device Configuration
     
-    // Write configuration to ESP32 via GATT
+    // Configuration is not currently supported by firmware
     func writeConfiguration(_ config: DeviceConfiguration) {
-        guard let peripheral = discoveredPeripheral,
-              let configCharacteristic = findCharacteristic(configUUID) else {
-            print("Cannot write configuration: not connected or characteristic not found")
-            return
-        }
-        
-        guard config.isValid else {
-            print("Invalid configuration values")
-            return
-        }
-        
-        let data = config.encode()
-        peripheral.writeValue(data, for: configCharacteristic, type: .withResponse)
-        
-        DispatchQueue.main.async {
-            self.configuration = config
-        }
-        
-        print("Writing configuration to device: \(data.map { String(format: "%02x", $0) }.joined())")
+        print("Configuration write not supported by current firmware")
     }
     
-    // Read current configuration from ESP32
     func readConfiguration() {
-        guard let peripheral = discoveredPeripheral,
-              let configCharacteristic = findCharacteristic(configUUID) else {
-            print("Cannot read configuration: not connected")
-            return
-        }
-        
-        peripheral.readValue(for: configCharacteristic)
-        print("Requesting configuration from device")
-    }
-    
-    // Helper to find characteristic by UUID
-    private func findCharacteristic(_ uuid: CBUUID) -> CBCharacteristic? {
-        guard let peripheral = discoveredPeripheral else { return nil }
-        
-        for service in peripheral.services ?? [] {
-            for characteristic in service.characteristics ?? [] {
-                if characteristic.uuid == uuid {
-                    return characteristic
-                }
-            }
-        }
-        return nil
+        print("Configuration read not supported by current firmware")
     }
     
     // MARK: - RSSI Monitoring
@@ -253,10 +228,6 @@ class BLEManager: NSObject, ObservableObject, CBCentralManagerDelegate, CBPeriph
             print("Bluetooth is powered on")
             
             restoreConnection()
-            
-            if useMockData {
-                startMockDataGeneration()
-            }
             
         case .poweredOff:
             print("Bluetooth is powered off")
@@ -339,8 +310,6 @@ class BLEManager: NSObject, ObservableObject, CBCentralManagerDelegate, CBPeriph
         peripheral.discoverServices([espServiceUUID])
         
         startRSSIUpdates()
-        
-        stopMockDataGeneration()
     }
     
     // Called when connection fails
@@ -387,12 +356,8 @@ class BLEManager: NSObject, ObservableObject, CBCentralManagerDelegate, CBPeriph
         for service in peripheral.services ?? [] {
             if service.uuid == espServiceUUID {
                 peripheral.discoverCharacteristics([
-                    configUUID,
-                    heartRateUUID,
-                    stepCountUUID,
-                    temperatureUUID,
-                    batteryUUID,
-                    dataStreamUUID
+                    dataStreamUUID,
+                    controlUUID
                 ], for: service)
             }
         }
@@ -413,15 +378,24 @@ class BLEManager: NSObject, ObservableObject, CBCentralManagerDelegate, CBPeriph
                 print("Subscribed to data stream notifications")
             }
             
-            if characteristic.uuid == heartRateUUID ||
-               characteristic.uuid == stepCountUUID ||
-               characteristic.uuid == temperatureUUID ||
-               characteristic.uuid == batteryUUID {
-                peripheral.setNotifyValue(true, for: characteristic)
-            }
-            
-            if characteristic.uuid == configUUID {
-                peripheral.readValue(for: characteristic)
+            if characteristic.uuid == controlUUID {
+                print("Found control characteristic")
+                
+                // Send Time Sync
+                let timeCommand = "TIME:\(Int(Date().timeIntervalSince1970))"
+                if let data = timeCommand.data(using: .ascii) {
+                    peripheral.writeValue(data, for: characteristic, type: .withResponse)
+                    print("Sent time sync: \(timeCommand)")
+                }
+                
+                // Request Data Stream
+                let sendCommand = "SEND"
+                if let data = sendCommand.data(using: .ascii) {
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                        peripheral.writeValue(data, for: characteristic, type: .withoutResponse)
+                        print("Sent SEND command")
+                    }
+                }
             }
         }
     }
@@ -435,73 +409,57 @@ class BLEManager: NSObject, ObservableObject, CBCentralManagerDelegate, CBPeriph
             return
         }
         
-        let receivedTime = Date()
-        if let lastTime = lastNotificationTime {
-            let latency = receivedTime.timeIntervalSince(lastTime) * 1000 // Convert to ms
-            if latency > 10.0 {
-                print("WARNING: Latency exceeded 10ms: \(latency)ms")
-            }
-        }
-        lastNotificationTime = receivedTime
-        
         switch characteristic.uuid {
         case dataStreamUUID:
-            handleTLVStream(data, timestamp: receivedTime)
-            
-        case configUUID:
-            if let config = DeviceConfiguration.decode(from: data) {
-                DispatchQueue.main.async {
-                    self.configuration = config
-                }
-                print("Received configuration: \(config)")
+            handleDataStream(data)
+        default:
+            break
+        }
+    }
+    
+    // Handle binary stream from firmware
+    private func handleDataStream(_ data: Data) {
+        guard !data.isEmpty else { return }
+        
+        let marker = data[0]
+        
+        switch marker {
+        case BLEProtocolParser.START_MARKER:
+            // Payload: 4 bytes count
+            if data.count >= 5 {
+                let count = data.subdata(in: 1..<5).withUnsafeBytes { $0.load(as: UInt32.self) }
+                print("Start marker received. Expecting \(count) records.")
+                sessionReadings.removeAll() // Clear buffer for new session
             }
             
-        case heartRateUUID:
-            handleSingleValue(data, type: 0x01, timestamp: receivedTime)
+        case BLEProtocolParser.DATA_MARKER:
+            // Payload: Record struct
+            // Skip the marker byte (index 0)
+            if data.count > 1, let record = BLEProtocolParser.parseRecord(data.subdata(in: 1..<data.count)) {
+                saveRecord(record)
+                sessionReadings.append(record) // Add to buffer
+            }
             
-        case stepCountUUID:
-            handleSingleValue(data, type: 0x02, timestamp: receivedTime)
-            
-        case temperatureUUID:
-            handleSingleValue(data, type: 0x03, timestamp: receivedTime)
-            
-        case batteryUUID:
-            handleSingleValue(data, type: 0x04, timestamp: receivedTime)
+        case BLEProtocolParser.END_MARKER:
+            print("End marker received. Transfer complete.")
+            uploadSessionToSupabase() // Trigger upload
             
         default:
             break
         }
-        
-        let processingTime = Date().timeIntervalSince(receivedTime) * 1000
-        if processingTime > 10.0 {
-            print("WARNING: Processing time exceeded 10ms: \(processingTime)ms")
-        }
     }
     
-    // Optimized handler for combined TLV stream
-    private func handleTLVStream(_ data: Data, timestamp: Date) {
-        let tlvReadings = TLVParser.parse(data)
-        
-        guard !tlvReadings.isEmpty, let repository = healthRepository else { return }
-        
-        for tlv in tlvReadings where tlv.type == 0x05 {
-            if let qualityByte = tlv.decodedValue() as? UInt8 {
-                DispatchQueue.main.async {
-                    self.latestQualityFlags = QualityFlags(rawValue: qualityByte)
-                }
-            }
-        }
-        
-        TLVParser.batchProcess(tlvReadings, timestamp: timestamp, repository: repository)
-    }
-    
-    // Handler for legacy single-value notifications
-    private func handleSingleValue(_ data: Data, type: UInt8, timestamp: Date) {
-        let tlv = HealthReadingTLV(type: type, length: UInt8(data.count), value: data)
-        
+    private func saveRecord(_ record: FirmwareRecord) {
         guard let repository = healthRepository else { return }
         
-        repository.saveReading(from: tlv, timestamp: timestamp)
+        repository.saveBatchReading(
+            timestamp: record.timestamp,
+            heartRate: Int16(record.heartRate),
+            stepCount: Int32(record.stepCount),
+            temperature: record.temperature,
+            batteryLevel: 100, // Not sent by firmware currently
+            qualityFlags: QualityFlags(rawValue: 0)
+        )
     }
     
     // Called when write completes
@@ -524,58 +482,98 @@ class BLEManager: NSObject, ObservableObject, CBCentralManagerDelegate, CBPeriph
         }
     }
     
-    // MARK: - Mock Data Generation
-    
-    // Starts generating mock data for testing without physical device
-    func startMockDataGeneration() {
-        guard useMockData, mockTimer == nil else { return }
-        
-        print("Starting mock data generation")
-        
-        // Generate data every 5 seconds
-        mockTimer = Timer.scheduledTimer(withTimeInterval: 5.0, repeats: true) { [weak self] _ in
-            self?.generateMockReading()
-        }
-    }
-    
-    // Stops mock data generation
-    func stopMockDataGeneration() {
-        mockTimer?.invalidate()
-        mockTimer = nil
-        print("Stopped mock data generation")
-    }
-    
-    // Generates realistic mock health data
-    private func generateMockReading() {
-        guard let repository = healthRepository else { return }
-        
-        let heartRate = Int16.random(in: 60...100)
-        let stepCount = Int32.random(in: 0...10000)
-        let temperature = Double.random(in: 97.0...99.0)
-        let batteryLevel = Int16.random(in: 20...100)
-        
-        var flags = QualityFlags(rawValue: 0)
-        if Int.random(in: 0...10) == 0 { flags.insert(.highMotion) }
-        if Int.random(in: 0...20) == 0 { flags.insert(.lowSignal) }
-        
-        // Save mock reading
-        repository.saveBatchReading(
-            timestamp: Date(),
-            heartRate: heartRate,
-            stepCount: stepCount,
-            temperature: temperature,
-            batteryLevel: batteryLevel,
-            qualityFlags: flags
-        )
-        
-        DispatchQueue.main.async {
-            self.latestQualityFlags = flags
-        }
-        
-        print("Generated mock reading: HR=\(heartRate) Steps=\(stepCount) Temp=\(temperature) Battery=\(batteryLevel)%")
-    }
-    
     // MARK - Supabase Data Fetching
+
+    private func uploadSessionToSupabase() {
+        guard !sessionReadings.isEmpty else { return }
+        
+        let recordsToUpload = sessionReadings
+        sessionReadings.removeAll()
+        
+        print("☁️ Uploading \(recordsToUpload.count) records to Supabase...")
+        
+        Task {
+            do {
+                // 1. Upload Readings
+                let insertRows = recordsToUpload.map { record in
+                    HealthReadingInsert(
+                        device_id: "esp32-devkit",
+                        heart_rate: record.heartRate,
+                        temperature: record.temperature,
+                        steps: record.stepCount,
+                        timestamp: record.timestamp,
+                        epoch_min: Int(record.timestamp.timeIntervalSince1970) / 60
+                    )
+                }
+                
+                try await supabaseRepository.uploadReadings(insertRows)
+                
+                // 2. Calculate and Upload Summary
+                let totalSteps = recordsToUpload.reduce(0) { $0 + $1.stepCount }
+                
+                // Retrieve user stats from UserDefaults (set in SettingsView)
+                let userHeight = UserDefaults.standard.double(forKey: "userHeightInches")
+                let userWeight = UserDefaults.standard.double(forKey: "userWeightLbs")
+                
+                // Defaults if not set: 5'10" (70 in) and 170 lbs
+                let heightInches = userHeight > 0 ? userHeight : 70.0
+                let weightLbs = userWeight > 0 ? userWeight : 170.0
+                
+                // Calculate Distance
+                let heightFeet = heightInches / 12.0
+                let strideLengthFeet = heightFeet * 0.43
+                let rawDistance = (strideLengthFeet * Double(totalSteps)) / 5280.0
+                
+                // Calculate Calories
+                let caloriesPerMile = weightLbs * 0.57
+                let rawCalories = rawDistance * caloriesPerMile
+                
+                // Format for storage (Distance to 0.01, Calories to whole number)
+                let totalDistance = (rawDistance * 100).rounded() / 100.0
+                let totalCalories = rawCalories.rounded()
+                
+                let timestamps = recordsToUpload.map { $0.timestamp }
+                let start = timestamps.min() ?? Date()
+                let end = timestamps.max() ?? Date()
+                
+                let summary = HealthSummaryInsert(
+                    device_id: "esp32-devkit",
+                    total_steps: totalSteps,
+                    total_distance_miles: totalDistance,
+                    total_calories: totalCalories,
+                    record_count: recordsToUpload.count,
+                    start_timestamp: start,
+                    end_timestamp: end,
+                    upload_timestamp: Date(),
+                    height_inches: heightInches,
+                    weight_lbs: weightLbs
+                )
+                
+                try await supabaseRepository.uploadSummary(summary)
+                
+                // 3. Erase Device Storage
+                await sendEraseCommand()
+                
+            } catch {
+                print("❌ Supabase upload failed: \(error)")
+            }
+        }
+    }
+    
+    private func sendEraseCommand() async {
+        guard let peripheral = discoveredPeripheral,
+              let service = peripheral.services?.first(where: { $0.uuid == espServiceUUID }),
+              let controlChar = service.characteristics?.first(where: { $0.uuid == controlUUID }) else {
+            print("Cannot erase: Control characteristic not found")
+            return
+        }
+        
+        let eraseCommand = "ERASE"
+        if let data = eraseCommand.data(using: .ascii) {
+            peripheral.writeValue(data, for: controlChar, type: .withResponse)
+            print("🧹 Sent ERASE command to device")
+        }
+    }
 
     func fetchSupabaseData() async {
         do {

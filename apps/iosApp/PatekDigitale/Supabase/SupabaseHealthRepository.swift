@@ -84,4 +84,33 @@ class SupabaseHealthRepository: ObservableObject {
             return response
         }
     }
+    
+    // Upload new readings
+    func uploadReadings(_ readings: [HealthReadingInsert]) async throws {
+        guard !readings.isEmpty else { return }
+        
+        // Supabase limits batch sizes, so we chunk it
+        let chunkSize = 100
+        let chunks = stride(from: 0, to: readings.count, by: chunkSize).map {
+            Array(readings[$0..<min($0 + chunkSize, readings.count)])
+        }
+        
+        for chunk in chunks {
+            try await client
+                .from("health_readings")
+                .insert(chunk)
+                .execute()
+        }
+        
+        print("✅ Uploaded \(readings.count) readings to Supabase")
+    }
+    
+    // Upload summary
+    func uploadSummary(_ summary: HealthSummaryInsert) async throws {
+        try await client
+            .from("health_summaries")
+            .insert(summary)
+            .execute()
+        print("✅ Uploaded summary to Supabase")
+    }
 }

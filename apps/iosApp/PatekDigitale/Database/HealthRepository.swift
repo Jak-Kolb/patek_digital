@@ -16,30 +16,6 @@ class HealthRepository {
         self.context = context
     }
     
-    // Saves a new HealthReading from BLE data
-    func saveReading(from tlv: HealthReadingTLV, timestamp: Date, qualityFlags: String = "") {
-        context.perform {
-            let reading = HealthReading(context: self.context)
-            reading.timestamp = timestamp
-            
-            // Decode and assign values based on TLV type
-            switch tlv.type {
-            case 0x01: reading.heartRate = tlv.decodedValue() as? Int16 ?? 0
-            case 0x02: reading.stepCount = tlv.decodedValue() as? Int32 ?? 0
-            case 0x03: reading.temperature = tlv.decodedValue() as? Double ?? 0.0
-            case 0x04: reading.batteryLevel = tlv.decodedValue() as? Int16 ?? 0
-            default: break
-            }
-            
-            reading.qualityFlags = qualityFlags
-            
-            do {
-                try self.context.save()
-            } catch {
-                print("Error saving reading: \(error)")
-            }
-        }
-    }
     
     // Optimized batch save for multiple TLV values in one transaction
     func saveBatchReading(timestamp: Date,
