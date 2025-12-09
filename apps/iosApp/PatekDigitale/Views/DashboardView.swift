@@ -27,6 +27,7 @@ struct DashboardView: View {
     @State private var latestBattery: Int = 0
     @State private var lastUpdate: Date?
     @State private var isLoading: Bool = false
+    @State private var hasFever: Bool = false
     
     // Animation state for heart rate pulsing
     @State private var heartPulse = false
@@ -92,6 +93,10 @@ struct DashboardView: View {
                             )
                         }
                         .padding(.horizontal)
+                        
+                        // Fever Indicator
+                        FeverCard(hasFever: hasFever)
+                            .padding(.horizontal)
                         
                         // MARK: - Last Update Timestamp
                         LastUpdateView(timestamp: lastUpdate)
@@ -180,6 +185,28 @@ struct DashboardView: View {
                 let distanceMiles = (strideLengthFeet * Double(dailySteps)) / 5280.0
                 dailyCalories = distanceMiles * weightLbs * 0.57
                 
+                // Calculate Fever Status
+                // Check if temperature rises above 94 degrees for longer than 5 minutes
+                var feverDetected = false
+                var feverStartTime: Date?
+                
+                for reading in readings {
+                    guard let rTempC = reading.temperature, let rTimestamp = reading.timestamp else { continue }
+                    let rTempF = (rTempC * 9/5) + 32
+                    
+                    if rTempF > 94.0 {
+                        if feverStartTime == nil {
+                            feverStartTime = rTimestamp
+                        } else if let start = feverStartTime, rTimestamp.timeIntervalSince(start) > 5 * 60 {
+                            feverDetected = true
+                            break
+                        }
+                    } else {
+                        feverStartTime = nil
+                    }
+                }
+                hasFever = feverDetected
+                
             } else {
                 // No data for today
                 dailySteps = 0
@@ -189,6 +216,7 @@ struct DashboardView: View {
                 latestHeartRate = 0
                 latestTemperature = 0
                 lastUpdate = nil
+                hasFever = false
             }
             
         } catch {
@@ -472,6 +500,46 @@ struct BatteryCard: View {
         .background(Color(.secondarySystemGroupedBackground))
         .cornerRadius(12)
         .shadow(color: Color.black.opacity(0.1), radius: 5, x: 0, y: 2)
+    }
+}
+
+// MARK: - Fever Card
+
+struct FeverCard: View {
+    let hasFever: Bool
+    
+    var body: some View {
+        HStack {
+            Image(systemName: hasFever ? "exclamationmark.triangle.fill" : "checkmark.circle.fill")
+                .font(.title2)
+                .foregroundColor(hasFever ? .red : .green)
+            
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Fever Status")
+                    .font(.headline)
+                    .foregroundColor(.secondary)
+                
+                Text(hasFever ? "Fever Detected" : "Normal Temperature")
+                    .font(.title3)
+                    .fontWeight(.semibold)
+                    .foregroundColor(hasFever ? .red : .primary)
+            }
+            
+            Spacer()
+            
+            if hasFever {
+                Text("> 94°F")
+                    .font(.caption)
+                    .padding(6)
+                    .background(Color.red.opacity(0.1))
+                    .cornerRadius(6)
+                    .foregroundColor(.red)
+            }
+        }
+        .padding()
+        .background(Color(.systemBackground))
+        .cornerRadius(16)
+        .shadow(radius: 2)
     }
 }
 
