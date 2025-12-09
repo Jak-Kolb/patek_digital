@@ -18,6 +18,7 @@ namespace {
 volatile uint32_t gFallbackBaseMillis = 0;
 volatile bool gResetRingRequested = false;
 reg_buffer::SampleRingBuffer gRing;
+static consolidate::IntervalAccumulator gAccumulator;
 
 void reset_fallback_clock() {
   gFallbackBaseMillis = millis();
@@ -143,11 +144,18 @@ void loop() {
 
   consolidate::ConsolidatedRecord record{};
   if (consolidate::consolidate_from_ring(gRing, record)) {
-    if (fs_store::append(record)) {
-      Serial.println("[STORE] Consolidated record appended");
-      // fs_store::printData(); // Disable full dump to prevent blocking
-    } else {
-      Serial.println("[STORE] Failed to append record");
+    consolidate::ConsolidatedRecord intervalRecord{};
+    if (gAccumulator.add(record, intervalRecord)) {
+      Serial.printf("[MAIN] 15s Interval accumulated: Steps=%u HR=%.1f Temp=%.2f\n", 
+          intervalRecord.step_count, 
+          intervalRecord.avg_hr_x10/10.0, 
+          intervalRecord.avg_temp_x100/100.0);
+
+      if (fs_store::append(intervalRecord)) {
+        Serial.println("[STORE] Interval record appended");
+      } else {
+        Serial.println("[STORE] Failed to append interval record");
+      }
     }
   }
   bleServer.update();

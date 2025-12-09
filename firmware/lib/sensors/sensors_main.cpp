@@ -1,6 +1,6 @@
 // Phase 2: Integrate sensor sampling at precise rates using hardware timers.
-//  - IMU: 100 Hz
-//  - PPG (MAX30102): 50 Hz
+//  - IMU: 50 Hz
+//  - PPG (MAX30102): 100 Hz
 //  - Temperature (MAX30205): 1 Hz
 // We perform I2C reads in the main loop when flags set by ISRs to keep ISRs fast.
 // Each 1 second window we print the averaged values over the prior second.
@@ -61,9 +61,9 @@ static bool bmi270_begin() {
     }
   }
   int8_t rs;
-  rs = g_imu.setAccelODR(BMI2_ACC_ODR_100HZ);
+  rs = g_imu.setAccelODR(BMI2_ACC_ODR_50HZ);
   if (rs != BMI2_OK) Serial.printf("BMI270 accel ODR fail (%d)\n", rs);
-  rs = g_imu.setGyroODR(BMI2_GYR_ODR_100HZ);
+  rs = g_imu.setGyroODR(BMI2_GYR_ODR_50HZ);
   if (rs != BMI2_OK) Serial.printf("BMI270 gyro ODR fail (%d)\n", rs);
   g_bmi_ok = true;
   Serial.println("BMI270 ready");
@@ -109,9 +109,9 @@ static bool max30102_begin() {
 
   // Setup with optimal settings for heart rate
   byte ledBrightness = 0x1F; // Options: 0=Off to 255=50mA. 0x1F (approx 6.4mA) is a good starting point
-  byte sampleAverage = 4;    // Options: 1, 2, 4, 8, 16, 32
+  byte sampleAverage = 1;    // Options: 1, 2, 4, 8, 16, 32
   byte ledMode = 3;          // Options: 1 = Red only, 2 = Red + DC, 3 = Red + IR
-  int sampleRate = 1000;      // Options: 50, 100, 200, 400, 800, 1000, 1600, 3200
+  int sampleRate = 100;      // Options: 50, 100, 200, 400, 800, 1000, 1600, 3200
   int pulseWidth = 411;      // Options: 69, 118, 215, 411
   int adcRange = 4096;       // Options: 2048, 4096, 8192, 16384
 
@@ -141,25 +141,17 @@ static bool max30205_readTemp(float &c) {
 }
 
 // --- Timer handles ---
-static hw_timer_t* tImu  = nullptr;
-static hw_timer_t* tPpg  = nullptr;
-static hw_timer_t* tTemp = nullptr;
+static hw_timer_t* tTick = nullptr;
 
 static TaskHandle_t g_sensorTaskHandle = nullptr;
 
 // --- ISR flags ---
-// Removed volatile flags in favor of direct task notifications
+static const uint32_t EVT_TICK = (1 << 0);
 
 // --- Accumulators for 1s window ---
 static uint32_t imuCount = 0; static double axSum=0, aySum=0, azSum=0, gxSum=0, gySum=0, gzSum=0, imuTempSumF=0;
 static uint32_t ppgCount = 0; static double redSum=0, irSum=0;
 static uint32_t tempCount = 0; static double bodyTempCSum=0, bodyTempFSum=0;
-
-// --- 500ms window accumulators ---
-static uint32_t halfImuCount = 0; static double halfAxSum=0, halfAySum=0, halfAzSum=0, halfGxSum=0, halfGySum=0, halfGzSum=0, halfImuTempSumF=0;
-static uint32_t halfPpgCount = 0; static double halfRedSum=0, halfIrSum=0;
-static uint32_t halfTempCount = 0; static double halfBodyTempCSum=0; // store C only; F derived when packing
-static uint32_t halfWindowStartMs = 0; // initialized in setup
 
 // --- Ring buffer target ---
 static reg_buffer::SampleRingBuffer* g_targetBuffer = nullptr;
@@ -196,23 +188,9 @@ static void updateHeartRate(long irValue) {
   }
 }
 
-static const uint32_t EVT_IMU  = (1 << 0);
-static const uint32_t EVT_PPG  = (1 << 1);
-static const uint32_t EVT_TEMP = (1 << 2);
-
-void IRAM_ATTR onImuTimer()  { 
+void IRAM_ATTR onTickTimer() { 
   BaseType_t xHigherPriorityTaskWoken = pdFALSE;
-  if (g_sensorTaskHandle) xTaskNotifyFromISR(g_sensorTaskHandle, EVT_IMU, eSetBits, &xHigherPriorityTaskWoken);
-  if (xHigherPriorityTaskWoken) portYIELD_FROM_ISR();
-}
-void IRAM_ATTR onPpgTimer()  { 
-  BaseType_t xHigherPriorityTaskWoken = pdFALSE;
-  if (g_sensorTaskHandle) xTaskNotifyFromISR(g_sensorTaskHandle, EVT_PPG, eSetBits, &xHigherPriorityTaskWoken);
-  if (xHigherPriorityTaskWoken) portYIELD_FROM_ISR();
-}
-void IRAM_ATTR onTempTimer() { 
-  BaseType_t xHigherPriorityTaskWoken = pdFALSE;
-  if (g_sensorTaskHandle) xTaskNotifyFromISR(g_sensorTaskHandle, EVT_TEMP, eSetBits, &xHigherPriorityTaskWoken);
+  if (g_sensorTaskHandle) xTaskNotifyFromISR(g_sensorTaskHandle, EVT_TICK, eSetBits, &xHigherPriorityTaskWoken);
   if (xHigherPriorityTaskWoken) portYIELD_FROM_ISR();
 }
 
@@ -230,7 +208,7 @@ void sensors_setup(reg_buffer::SampleRingBuffer* buffer) {
   g_targetBuffer = buffer;
   // Serial.begin(115200);
   // delay(500);
-  Serial.println("\nTimed sensor sampling demo (Phase 2)");
+  Serial.println("\nTimed sensor sampling demo (Phase 2 - Optimized)");
   Wire.begin(I2C_SDA_PIN, I2C_SCL_PIN);
   Wire.setClock(I2C_CLOCK_HZ); // full speed for sensor throughput; adjust if bus stability issues
   delay(10);
@@ -238,20 +216,21 @@ void sensors_setup(reg_buffer::SampleRingBuffer* buffer) {
   (void)max30102_begin();
   (void)max30205_begin();
   // Configure timers: APB 80MHz / divider 80 = 1MHz tick
-  // Target 25 Hz = 40000 us
-  tImu  = setupTimer(0, 80, 40000,    onImuTimer);   // 25 Hz
-  tPpg  = setupTimer(1, 80, 10000,    onPpgTimer);   // 100 Hz
-  tTemp = setupTimer(2, 80, 1000000,  onTempTimer);  // 1 Hz
-  halfWindowStartMs = millis();
-
+  // Target 100 Hz = 10000 us
+  tTick = setupTimer(0, 80, 10000, onTickTimer);   // 100 Hz base tick
+  
   xTaskCreatePinnedToCore(sensorsTask, "Sensors", 4096, NULL, 2, &g_sensorTaskHandle, 1);
 }
 
 static float lastBodyTempC = 0.0f;
+static volatile int g_cachedMedianHr = 0;
+
+static int getMedianHr(); // Forward decl
 
 static void pushHrValue(int val) {
     hrBuffer[hrBufferIdx] = val;
     hrBufferIdx = (hrBufferIdx + 1) % 4;
+    getMedianHr(); // Update cache immediately
 }
 
 static int getMedianHr() {
@@ -266,7 +245,9 @@ static int getMedianHr() {
         }
     }
     // Median of 4: average of index 1 and 2
-    return (sorted[1] + sorted[2]) / 2;
+    int median = (sorted[1] + sorted[2]) / 2;
+    g_cachedMedianHr = median;
+    return median;
 }
 
 static void sampleImu() {
@@ -282,7 +263,7 @@ static void sampleImu() {
     rs.gx = (reg_buffer::float16)s.gx;
     rs.gy = (reg_buffer::float16)s.gy;
     rs.gz = (reg_buffer::float16)s.gz;
-    rs.hr_bpm = (reg_buffer::float16)getMedianHr();
+    rs.hr_bpm = (reg_buffer::float16)g_cachedMedianHr;
     rs.temp_c = (reg_buffer::float16)lastBodyTempC;
     
     const time_t t_now = time(nullptr);
@@ -328,48 +309,57 @@ static void sampleTemp() {
 
 static void sensorsTask(void* arg) {
   uint32_t events;
+  uint32_t localTick = 0;
+
   while(true) {
     // Wait for notification bits
     xTaskNotifyWait(0, ULONG_MAX, &events, portMAX_DELAY);
 
-    if (events & EVT_IMU) {
-      sampleImu();
-    }
-    if (events & EVT_PPG) {
+    if (events & EVT_TICK) {
+      // 1. PPG (100Hz) - Every tick
       samplePpg();
-    }
-    if (events & EVT_TEMP) {
-      sampleTemp();
-      
-      // Compute averages (triggered by 1Hz temp timer)
-      double axAvg = imuCount ? axSum / imuCount : NAN;
-      double ayAvg = imuCount ? aySum / imuCount : NAN;
-      double azAvg = imuCount ? azSum / imuCount : NAN;
-      double gxAvg = imuCount ? gxSum / imuCount : NAN;
-      double gyAvg = imuCount ? gySum / imuCount : NAN;
-      double gzAvg = imuCount ? gzSum / imuCount : NAN;
-      double imuTempFAvg = (imuCount && imuTempSumF>0) ? imuTempSumF / imuCount : NAN;
-      double redAvg = ppgCount ? redSum / ppgCount : NAN;
-      double irAvg  = ppgCount ? irSum  / ppgCount : NAN;
+
+      // 2. IMU (50Hz) - Every 2 ticks
+      if (localTick % 2 == 0) {
+        sampleImu();
+      }
+
+      // 3. Temp (1Hz) - Every 100 ticks
+      if (localTick % 100 == 0) {
+        sampleTemp();
+        
+        // Compute averages (triggered by 1Hz temp timer)
+        double axAvg = imuCount ? axSum / imuCount : NAN;
+        double ayAvg = imuCount ? aySum / imuCount : NAN;
+        double azAvg = imuCount ? azSum / imuCount : NAN;
+        double gxAvg = imuCount ? gxSum / imuCount : NAN;
+        double gyAvg = imuCount ? gySum / imuCount : NAN;
+        double gzAvg = imuCount ? gzSum / imuCount : NAN;
+        double imuTempFAvg = (imuCount && imuTempSumF>0) ? imuTempSumF / imuCount : NAN;
+        double redAvg = ppgCount ? redSum / ppgCount : NAN;
+        double irAvg  = ppgCount ? irSum  / ppgCount : NAN;
       double bodyTCAvg = tempCount ? bodyTempCSum / tempCount : NAN;
       double bodyTFAvg = tempCount ? bodyTempFSum / tempCount : NAN;
 
-      Serial.printf("1s AVG IMU at sample rate %uHz (target 25) a[g]=[% .3f % .3f % .3f] g[dps]=[% .2f % .2f % .2f]", imuCount, axAvg, ayAvg, azAvg, gxAvg, gyAvg, gzAvg);
+      Serial.printf("1s AVG IMU at sample rate %uHz (target 50) a[g]=[% .3f % .3f % .3f] g[dps]=[% .2f % .2f % .2f]", imuCount, axAvg, ayAvg, azAvg, gxAvg, gyAvg, gzAvg);
       if (!isnan(imuTempFAvg)) Serial.printf(" imuT=%.1fF", imuTempFAvg);
       Serial.print("\n");
-      Serial.printf("1s AVG PPG at sample rate %uHz (target 100) RED=%.0f IR=%.0f\n", ppgCount, redAvg, irAvg);
-      Serial.printf("HR=%d BPM (Avg)\n", beatAvg);
-      Serial.printf("HR=%.1f BPM (Recent)\n", beatsPerMinute);
-      if (!isnan(bodyTCAvg)) {
-        Serial.printf("1s AVG BodyTemp at sample rate %uHz: %.2fC (%.2fF)\n", tempCount, bodyTCAvg, bodyTFAvg);
-      } else {
-        Serial.println("1s AVG BodyTemp: no samples");
+        Serial.printf("1s AVG PPG at sample rate %uHz (target 100) RED=%.0f IR=%.0f\n", ppgCount, redAvg, irAvg);
+        Serial.printf("HR=%d BPM (Avg)\n", beatAvg);
+        Serial.printf("HR=%.1f BPM (Recent)\n", beatsPerMinute);
+        if (!isnan(bodyTCAvg)) {
+          Serial.printf("1s AVG BodyTemp at sample rate %uHz: %.2fC (%.2fF)\n", tempCount, bodyTCAvg, bodyTFAvg);
+        } else {
+          Serial.println("1s AVG BodyTemp: no samples");
+        }
+        Serial.println("---");
+        // Reset accumulators for next window
+        axSum=aySum=azSum=gxSum=gySum=gzSum=imuTempSumF=0; imuCount=0;
+        redSum=irSum=0; ppgCount=0;
+        bodyTempCSum=bodyTempFSum=0; tempCount=0;
       }
-      Serial.println("---");
-      // Reset accumulators for next window
-      axSum=aySum=azSum=gxSum=gySum=gzSum=imuTempSumF=0; imuCount=0;
-      redSum=irSum=0; ppgCount=0;
-      bodyTempCSum=bodyTempFSum=0; tempCount=0;
+      
+      localTick++;
     }
   }
 }

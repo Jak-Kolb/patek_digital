@@ -7,21 +7,24 @@
 
 import SwiftUI
 import Charts
-import CoreData
 
 /// Main view that displays health data charts with time range filtering
 struct ChartsView: View {
-    // Access to CoreData context for fetching health readings
-    @Environment(\.managedObjectContext) private var context
-    
     // Currently selected time range for data filtering
     @State private var selectedTimeRange: TimeRange = .today
     
     // Selected detail reading when user taps a chart point
-    @State private var selectedReading: HealthReading?
+    @State private var selectedReading: HealthReadingRow?
     
     // Show detail overlay when a data point is tapped
     @State private var showDetail = false
+    
+    // Supabase Repository
+    private let supabase = SupabaseHealthRepository()
+    
+    // Local State for Chart Data
+    @State private var readings: [HealthReadingRow] = []
+    @State private var isLoading: Bool = false
     
     var body: some View {
         NavigationView {
@@ -36,66 +39,64 @@ struct ChartsView: View {
                     }
                     .pickerStyle(.segmented)
                     .padding(.horizontal)
+                    .onChange(of: selectedTimeRange) { _ in
+                        Task {
+                            await fetchChartData()
+                        }
+                    }
                     
-                    // MARK: - Statistics Summary Card
-                    // Display aggregate statistics for the selected time range
-                    StatisticsCardView(timeRange: selectedTimeRange)
+                    if isLoading {
+                        ProgressView("Loading chart data...")
+                            .padding()
+                            .frame(height: 200)
+                    } else {
+                        // MARK: - Statistics Summary Card
+                        // Display aggregate statistics for the selected time range
+                        StatisticsCardView(readings: readings)
+                            .padding(.horizontal)
+                        
+                        // MARK: - Chart Sections
+                        // Each chart displays a different health metric
+                        
+                        // Heart Rate Line Chart (bpm over time)
+                        HeartRateChartView(
+                            readings: readings,
+                            selectedReading: $selectedReading,
+                            showDetail: $showDetail
+                        )
+                        .frame(height: 250)
+                        .padding()
+                        .background(Color(.systemBackground))
+                        .cornerRadius(12)
+                        .shadow(radius: 2)
                         .padding(.horizontal)
-                    
-                    // MARK: - Chart Sections
-                    // Each chart displays a different health metric
-                    
-                    // Heart Rate Line Chart (bpm over time)
-                    HeartRateChartView(
-                        timeRange: selectedTimeRange,
-                        selectedReading: $selectedReading,
-                        showDetail: $showDetail
-                    )
-                    .frame(height: 250)
-                    .padding()
-                    .background(Color(.systemBackground))
-                    .cornerRadius(12)
-                    .shadow(radius: 2)
-                    .padding(.horizontal)
-                    
-                    // Step Count Bar Chart (daily totals)
-                    StepCountChartView(
-                        timeRange: selectedTimeRange,
-                        selectedReading: $selectedReading,
-                        showDetail: $showDetail
-                    )
-                    .frame(height: 250)
-                    .padding()
-                    .background(Color(.systemBackground))
-                    .cornerRadius(12)
-                    .shadow(radius: 2)
-                    .padding(.horizontal)
-                    
-                    // Temperature Area Chart (temperature trends)
-                    TemperatureChartView(
-                        timeRange: selectedTimeRange,
-                        selectedReading: $selectedReading,
-                        showDetail: $showDetail
-                    )
-                    .frame(height: 250)
-                    .padding()
-                    .background(Color(.systemBackground))
-                    .cornerRadius(12)
-                    .shadow(radius: 2)
-                    .padding(.horizontal)
-                    
-                    // Battery Level Line Chart
-                    BatteryChartView(
-                        timeRange: selectedTimeRange,
-                        selectedReading: $selectedReading,
-                        showDetail: $showDetail
-                    )
-                    .frame(height: 250)
-                    .padding()
-                    .background(Color(.systemBackground))
-                    .cornerRadius(12)
-                    .shadow(radius: 2)
-                    .padding(.horizontal)
+                        
+                        // Step Count Bar Chart (daily totals)
+                        StepCountChartView(
+                            readings: readings,
+                            selectedReading: $selectedReading,
+                            showDetail: $showDetail
+                        )
+                        .frame(height: 250)
+                        .padding()
+                        .background(Color(.systemBackground))
+                        .cornerRadius(12)
+                        .shadow(radius: 2)
+                        .padding(.horizontal)
+                        
+                        // Temperature Area Chart (temperature trends)
+                        TemperatureChartView(
+                            readings: readings,
+                            selectedReading: $selectedReading,
+                            showDetail: $showDetail
+                        )
+                        .frame(height: 250)
+                        .padding()
+                        .background(Color(.systemBackground))
+                        .cornerRadius(12)
+                        .shadow(radius: 2)
+                        .padding(.horizontal)
+                    }
                 }
                 .padding(.vertical)
             }
@@ -107,6 +108,32 @@ struct ChartsView: View {
                     ReadingDetailView(reading: reading)
                 }
             }
+            .task {
+                await fetchChartData()
+            }
+            .refreshable {
+                await fetchChartData()
+            }
+        }
+    }
+    
+    private func fetchChartData() async {
+        // Only show full-screen loading if we have no data
+        if readings.isEmpty {
+            isLoading = true
+        }
+        defer { isLoading = false }
+        
+        do {
+            let now = Date()
+            let startDate = selectedTimeRange.startDate
+            
+            // Fetch readings from Supabase
+            readings = try await supabase.fetchReadings(from: startDate, to: now)
+            
+        } catch {
+            print("Error fetching chart data: \(error)")
+            readings = []
         }
     }
 }
@@ -154,21 +181,7 @@ enum TimeRange: String, CaseIterable {
 
 /// Displays aggregate statistics for the selected time range
 struct StatisticsCardView: View {
-    let timeRange: TimeRange
-    
-    // Fetch health readings for the selected time range
-    @FetchRequest private var readings: FetchedResults<HealthReading>
-    
-    init(timeRange: TimeRange) {
-        self.timeRange = timeRange
-        
-        // Create fetch request with date predicate for time range filtering
-        let request: NSFetchRequest<HealthReading> = HealthReading.fetchRequest()
-        request.predicate = NSPredicate(format: "timestamp >= %@", timeRange.startDate as NSDate)
-        request.sortDescriptors = [NSSortDescriptor(keyPath: \HealthReading.timestamp, ascending: false)]
-        
-        _readings = FetchRequest(fetchRequest: request, animation: .default)
-    }
+    let readings: [HealthReadingRow]
     
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -207,7 +220,7 @@ struct StatisticsCardView: View {
                     icon: "battery.100",
                     color: .green,
                     title: "Avg Battery",
-                    value: "\(averageBattery)%"
+                    value: "100%" // Placeholder
                 )
             }
         }
@@ -221,32 +234,25 @@ struct StatisticsCardView: View {
     /// Calculate average heart rate across all readings
     private var averageHeartRate: Int {
         guard !readings.isEmpty else { return 0 }
-        let sum = readings.reduce(0) { $0 + Int($1.heartRate) }
+        let sum = readings.reduce(0) { $0 + Int($1.heart_rate ?? 0) }
         return sum / readings.count
     }
     
     /// Calculate total steps across all readings
     private var totalSteps: Int {
-        readings.reduce(0) { $0 + Int($1.stepCount) }
+        readings.reduce(0) { $0 + Int($1.steps ?? 0) }
     }
     
     /// Find minimum temperature
     private var minTemp: Int {
-        guard let min = readings.map({ $0.temperature }).min() else { return 0 }
-        return Int(min)
+        guard let min = readings.compactMap({ $0.temperature }).min() else { return 0 }
+        return Int((min * 9/5) + 32)
     }
     
     /// Find maximum temperature
     private var maxTemp: Int {
-        guard let max = readings.map({ $0.temperature }).max() else { return 0 }
-        return Int(max)
-    }
-    
-    /// Calculate average battery level
-    private var averageBattery: Int {
-        guard !readings.isEmpty else { return 0 }
-        let sum = readings.reduce(0) { $0 + Int($1.batteryLevel) }
-        return sum / readings.count
+        guard let max = readings.compactMap({ $0.temperature }).max() else { return 0 }
+        return Int((max * 9/5) + 32)
     }
 }
 
@@ -283,28 +289,12 @@ struct StatItemView: View {
 
 /// Line chart displaying heart rate over time
 struct HeartRateChartView: View {
-    let timeRange: TimeRange
-    @Binding var selectedReading: HealthReading?
+    let readings: [HealthReadingRow]
+    @Binding var selectedReading: HealthReadingRow?
     @Binding var showDetail: Bool
-    
-    // Fetch readings for the selected time range
-    @FetchRequest private var readings: FetchedResults<HealthReading>
     
     // Track selected timestamp for chart interaction
     @State private var selectedTimestamp: Date?
-    
-    init(timeRange: TimeRange, selectedReading: Binding<HealthReading?>, showDetail: Binding<Bool>) {
-        self.timeRange = timeRange
-        self._selectedReading = selectedReading
-        self._showDetail = showDetail
-        
-        // Fetch request with date filtering
-        let request: NSFetchRequest<HealthReading> = HealthReading.fetchRequest()
-        request.predicate = NSPredicate(format: "timestamp >= %@", timeRange.startDate as NSDate)
-        request.sortDescriptors = [NSSortDescriptor(keyPath: \HealthReading.timestamp, ascending: true)]
-        
-        _readings = FetchRequest(fetchRequest: request, animation: .default)
-    }
     
     var body: some View {
         VStack(alignment: .leading) {
@@ -320,10 +310,10 @@ struct HeartRateChartView: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 // Swift Charts LineMark chart
-                Chart(Array(readings), id: \.timestamp) { reading in
+                Chart(readings, id: \.timestamp) { reading in
                     LineMark(
                         x: .value("Time", reading.timestamp ?? Date()),
-                        y: .value("BPM", reading.heartRate)
+                        y: .value("BPM", reading.heart_rate ?? 0)
                     )
                     .foregroundStyle(.red)
                     .lineStyle(StrokeStyle(lineWidth: 2))
@@ -331,7 +321,7 @@ struct HeartRateChartView: View {
                     // Add point markers for individual readings
                     PointMark(
                         x: .value("Time", reading.timestamp ?? Date()),
-                        y: .value("BPM", reading.heartRate)
+                        y: .value("BPM", reading.heart_rate ?? 0)
                     )
                     .foregroundStyle(.red)
                     .symbolSize(30)
@@ -341,7 +331,7 @@ struct HeartRateChartView: View {
                        calendar.isDate(reading.timestamp ?? Date(), equalTo: selectedTimestamp, toGranularity: .second) {
                         PointMark(
                             x: .value("Time", reading.timestamp ?? Date()),
-                            y: .value("BPM", reading.heartRate)
+                            y: .value("BPM", reading.heart_rate ?? 0)
                         )
                         .foregroundStyle(.yellow)
                         .symbolSize(80)
@@ -406,24 +396,11 @@ struct HeartRateChartView: View {
 
 /// Bar chart displaying daily step count totals
 struct StepCountChartView: View {
-    let timeRange: TimeRange
-    @Binding var selectedReading: HealthReading?
+    let readings: [HealthReadingRow]
+    @Binding var selectedReading: HealthReadingRow?
     @Binding var showDetail: Bool
     
-    @FetchRequest private var readings: FetchedResults<HealthReading>
     @State private var selectedDate: Date?
-    
-    init(timeRange: TimeRange, selectedReading: Binding<HealthReading?>, showDetail: Binding<Bool>) {
-        self.timeRange = timeRange
-        self._selectedReading = selectedReading
-        self._showDetail = showDetail
-        
-        let request: NSFetchRequest<HealthReading> = HealthReading.fetchRequest()
-        request.predicate = NSPredicate(format: "timestamp >= %@", timeRange.startDate as NSDate)
-        request.sortDescriptors = [NSSortDescriptor(keyPath: \HealthReading.timestamp, ascending: true)]
-        
-        _readings = FetchRequest(fetchRequest: request, animation: .default)
-    }
     
     var body: some View {
         VStack(alignment: .leading) {
@@ -486,7 +463,7 @@ struct StepCountChartView: View {
         
         // Sum steps for each day and sort by date
         return grouped.map { (date, readings) in
-            let totalSteps = readings.reduce(0) { $0 + Int($1.stepCount) }
+            let totalSteps = readings.reduce(0) { $0 + Int($1.steps ?? 0) }
             return (date: date, steps: totalSteps)
         }.sorted { $0.date < $1.date }
     }
@@ -509,24 +486,11 @@ struct StepCountChartView: View {
 
 /// Area chart displaying temperature trends over time
 struct TemperatureChartView: View {
-    let timeRange: TimeRange
-    @Binding var selectedReading: HealthReading?
+    let readings: [HealthReadingRow]
+    @Binding var selectedReading: HealthReadingRow?
     @Binding var showDetail: Bool
     
-    @FetchRequest private var readings: FetchedResults<HealthReading>
     @State private var selectedTimestamp: Date?
-    
-    init(timeRange: TimeRange, selectedReading: Binding<HealthReading?>, showDetail: Binding<Bool>) {
-        self.timeRange = timeRange
-        self._selectedReading = selectedReading
-        self._showDetail = showDetail
-        
-        let request: NSFetchRequest<HealthReading> = HealthReading.fetchRequest()
-        request.predicate = NSPredicate(format: "timestamp >= %@", timeRange.startDate as NSDate)
-        request.sortDescriptors = [NSSortDescriptor(keyPath: \HealthReading.timestamp, ascending: true)]
-        
-        _readings = FetchRequest(fetchRequest: request, animation: .default)
-    }
     
     var body: some View {
         VStack(alignment: .leading) {
@@ -540,10 +504,10 @@ struct TemperatureChartView: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 // AreaMark chart for temperature with gradient fill
-                Chart(Array(readings), id: \.timestamp) { reading in
+                Chart(readings, id: \.timestamp) { reading in
                     AreaMark(
                         x: .value("Time", reading.timestamp ?? Date()),
-                        y: .value("°F", reading.temperature)
+                        y: .value("°F", (reading.temperature ?? 0) * 9/5 + 32)
                     )
                     .foregroundStyle(
                         LinearGradient(
@@ -556,7 +520,7 @@ struct TemperatureChartView: View {
                     // Add line on top of area
                     LineMark(
                         x: .value("Time", reading.timestamp ?? Date()),
-                        y: .value("°F", reading.temperature)
+                        y: .value("°F", (reading.temperature ?? 0) * 9/5 + 32)
                     )
                     .foregroundStyle(.orange)
                     .lineStyle(StrokeStyle(lineWidth: 2))
@@ -566,7 +530,7 @@ struct TemperatureChartView: View {
                        calendar.isDate(reading.timestamp ?? Date(), equalTo: selectedTimestamp, toGranularity: .second) {
                         PointMark(
                             x: .value("Time", reading.timestamp ?? Date()),
-                            y: .value("°F", reading.temperature)
+                            y: .value("°F", (reading.temperature ?? 0) * 9/5 + 32)
                         )
                         .foregroundStyle(.yellow)
                         .symbolSize(80)
@@ -621,130 +585,11 @@ struct TemperatureChartView: View {
     }
 }
 
-// MARK: - Battery Chart View
-
-/// Line chart displaying battery level over time
-struct BatteryChartView: View {
-    let timeRange: TimeRange
-    @Binding var selectedReading: HealthReading?
-    @Binding var showDetail: Bool
-    
-    @FetchRequest private var readings: FetchedResults<HealthReading>
-    @State private var selectedTimestamp: Date?
-    
-    init(timeRange: TimeRange, selectedReading: Binding<HealthReading?>, showDetail: Binding<Bool>) {
-        self.timeRange = timeRange
-        self._selectedReading = selectedReading
-        self._showDetail = showDetail
-        
-        let request: NSFetchRequest<HealthReading> = HealthReading.fetchRequest()
-        request.predicate = NSPredicate(format: "timestamp >= %@", timeRange.startDate as NSDate)
-        request.sortDescriptors = [NSSortDescriptor(keyPath: \HealthReading.timestamp, ascending: true)]
-        
-        _readings = FetchRequest(fetchRequest: request, animation: .default)
-    }
-    
-    var body: some View {
-        VStack(alignment: .leading) {
-            Text("Battery Level")
-                .font(.headline)
-                .padding(.bottom, 4)
-            
-            if readings.isEmpty {
-                Text("No battery data available")
-                    .foregroundColor(.secondary)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-            } else {
-                // Line chart with color gradient based on battery level
-                Chart(Array(readings), id: \.timestamp) { reading in
-                    LineMark(
-                        x: .value("Time", reading.timestamp ?? Date()),
-                        y: .value("Level", reading.batteryLevel)
-                    )
-                    .foregroundStyle(batteryColor(for: reading.batteryLevel))
-                    .lineStyle(StrokeStyle(lineWidth: 2))
-                    
-                    PointMark(
-                        x: .value("Time", reading.timestamp ?? Date()),
-                        y: .value("Level", reading.batteryLevel)
-                    )
-                    .foregroundStyle(batteryColor(for: reading.batteryLevel))
-                    .symbolSize(30)
-                    
-                    // Highlight selected point
-                    if let selectedTimestamp = selectedTimestamp,
-                       calendar.isDate(reading.timestamp ?? Date(), equalTo: selectedTimestamp, toGranularity: .second) {
-                        PointMark(
-                            x: .value("Time", reading.timestamp ?? Date()),
-                            y: .value("Level", reading.batteryLevel)
-                        )
-                        .foregroundStyle(.yellow)
-                        .symbolSize(80)
-                    }
-                }
-                .chartXAxis {
-                    AxisMarks(values: .automatic) { value in
-                        AxisGridLine()
-                        AxisValueLabel(format: .dateTime.hour().minute())
-                    }
-                }
-                .chartYAxis {
-                    AxisMarks(position: .leading) { value in
-                        AxisGridLine()
-                        AxisValueLabel {
-                            if let intValue = value.as(Int.self) {
-                                Text("\(intValue)%")
-                                    .font(.caption)
-                            }
-                        }
-                    }
-                }
-                // Set Y-axis range for battery percentage
-                .chartYScale(domain: 0...100)
-                // Enable chart selection
-                .chartXSelection(value: $selectedTimestamp)
-                .onChange(of: selectedTimestamp) { oldValue, newValue in
-                    if let timestamp = newValue {
-                        findAndSelectClosestReading(to: timestamp)
-                    }
-                }
-
-            }
-        }
-    }
-    
-    private var calendar: Calendar {
-        Calendar.current
-    }
-    
-    /// Returns color based on battery level (green/yellow/red)
-    private func batteryColor(for level: Int16) -> Color {
-        switch level {
-        case 50...100: return .green
-        case 20..<50: return .yellow
-        default: return .red
-        }
-    }
-    
-    private func findAndSelectClosestReading(to timestamp: Date) {
-        let closest = readings.min(by: { reading1, reading2 in
-            let diff1 = abs((reading1.timestamp ?? Date()).timeIntervalSince(timestamp))
-            let diff2 = abs((reading2.timestamp ?? Date()).timeIntervalSince(timestamp))
-            return diff1 < diff2
-        })
-        
-        if let closest = closest {
-            selectedReading = closest
-            showDetail = true
-        }
-    }
-}
-
 // MARK: - Reading Detail View
 
 /// Detail view shown when user taps a chart data point
 struct ReadingDetailView: View {
-    let reading: HealthReading
+    let reading: HealthReadingRow
     @Environment(\.dismiss) private var dismiss
     
     var body: some View {
@@ -767,7 +612,7 @@ struct ReadingDetailView: View {
                             .foregroundColor(.red)
                         Text("Heart Rate")
                         Spacer()
-                        Text("\(reading.heartRate) bpm")
+                        Text("\(Int(reading.heart_rate ?? 0)) bpm")
                             .foregroundColor(.secondary)
                     }
                     
@@ -777,7 +622,7 @@ struct ReadingDetailView: View {
                             .foregroundColor(.blue)
                         Text("Steps")
                         Spacer()
-                        Text("\(reading.stepCount)")
+                        Text("\(reading.steps ?? 0)")
                             .foregroundColor(.secondary)
                     }
                     
@@ -787,7 +632,7 @@ struct ReadingDetailView: View {
                             .foregroundColor(.orange)
                         Text("Temperature")
                         Spacer()
-                        Text(String(format: "%.1f°F", reading.temperature))
+                        Text(String(format: "%.1f°F", (reading.temperature ?? 0) * 9/5 + 32))
                             .foregroundColor(.secondary)
                     }
                     
@@ -797,20 +642,8 @@ struct ReadingDetailView: View {
                             .foregroundColor(.green)
                         Text("Battery")
                         Spacer()
-                        Text("\(reading.batteryLevel)%")
+                        Text("100%") // Placeholder
                             .foregroundColor(.secondary)
-                    }
-                }
-                
-                // Quality section
-                Section(header: Text("Data Quality")) {
-                    HStack {
-                        Image(systemName: "info.circle")
-                            .foregroundColor(.gray)
-                        Text("Quality Flags")
-                        Spacer()
-                        Text(reading.qualityFlags ?? "Good")
-                            .foregroundColor(reading.qualityFlags == "Good" ? .green : .orange)
                     }
                 }
             }
@@ -832,6 +665,5 @@ struct ReadingDetailView: View {
 struct ChartsView_Previews: PreviewProvider {
     static var previews: some View {
         ChartsView()
-            .environment(\.managedObjectContext, DataController.shared.container.viewContext)
     }
 }

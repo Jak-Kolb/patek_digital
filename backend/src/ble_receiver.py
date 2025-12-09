@@ -35,6 +35,9 @@ END_MARKER = 0x03
 
 # Struct format: <HhHI (uint16, int16, uint16, uint32)
 # Matches: avg_hr_x10, avg_temp_x100, step_count, timestamp
+# NOTE: Firmware now sends 15-second consolidated records.
+# step_count is total steps in the 15s interval.
+# avg_hr and avg_temp are averages over the 15s interval.
 RECORD_STRUCT = struct.Struct("<HhHI")
 
 
@@ -146,13 +149,15 @@ async def stream_records(client: BleakClient, state: TransferState, disconnect_e
     await write_command(client, "SEND", response=False)
 
     # Wait for: Finish OR Disconnect OR Timeout
+    # Increased timeout to 300s (5 min) to allow for larger history dumps
+    # since 1-minute consolidation allows storing much more time in the same flash space.
     done, pending = await asyncio.wait(
         [
             asyncio.create_task(state.finished.wait()), 
             asyncio.create_task(disconnect_event.wait())
         ],
         return_when=asyncio.FIRST_COMPLETED,
-        timeout=60.0
+        timeout=300.0
     )
 
     # Cleanup
@@ -210,7 +215,7 @@ async def upload_to_supabase(device_id: str, records: List[dict], height_inches:
             'temperature': rec['avg_temp_x100'] / 100.0,
             'steps': rec['step_count'],
             'timestamp': datetime.fromtimestamp(rec['timestamp']).isoformat(),
-            'epoch_min': rec['timestamp'] // 60 # Keep for backward compatibility if needed, or remove
+            'epoch_min': rec['timestamp'] // 60 # Minute epoch
         })
     
     # Batch insert
@@ -221,7 +226,7 @@ async def upload_to_supabase(device_id: str, records: List[dict], height_inches:
             chunk = supabase_records[i:i + chunk_size]
             supabase.table('health_readings').insert(chunk).execute()
             
-        log(f"Uploaded {len(supabase_records)} records to Supabase.")
+        log(f"Uploaded {len(supabase_records)} 15-second consolidated records to Supabase.")
 
         summary_record = {
             'device_id': device_id,

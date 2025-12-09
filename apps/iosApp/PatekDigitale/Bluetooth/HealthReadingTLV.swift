@@ -8,6 +8,7 @@
 import Foundation
 
 // Structure matching the firmware's consolidated record
+// Represents a 15-second interval of data
 struct FirmwareRecord {
     let heartRate: Double
     let temperature: Double
@@ -22,6 +23,7 @@ class BLEProtocolParser {
     static let END_MARKER: UInt8   = 0x03
     
     // Struct size: 2 (HR) + 2 (Temp) + 2 (Steps) + 4 (Time) = 10 bytes
+    // Matches firmware ConsolidatedRecord
     static let RECORD_SIZE = 10
     
     static func parseRecord(_ data: Data) -> FirmwareRecord? {
@@ -29,13 +31,13 @@ class BLEProtocolParser {
         guard data.count >= RECORD_SIZE else { return nil }
         
         // Parse Little Endian values
-        // 1. Heart Rate (UInt16) - avg_hr_x10
+        // 1. Heart Rate (UInt16) - avg_hr_x10 (Average over 15s)
         let hrRaw = data.subdata(in: 0..<2).withUnsafeBytes { $0.load(as: UInt16.self) }
         
-        // 2. Temperature (Int16) - avg_temp_x100
+        // 2. Temperature (Int16) - avg_temp_x100 (Average over 15s)
         let tempRaw = data.subdata(in: 2..<4).withUnsafeBytes { $0.load(as: Int16.self) }
         
-        // 3. Step Count (UInt16)
+        // 3. Step Count (UInt16) - Total steps in 15s
         let stepsRaw = data.subdata(in: 4..<6).withUnsafeBytes { $0.load(as: UInt16.self) }
         
         // 4. Timestamp (UInt32)

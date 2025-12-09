@@ -135,8 +135,8 @@ bool consolidate(const reg_buffer::Sample* samples,
     record_out.step_count = window_steps;
     record_out.timestamp = samples[sample_count - 1].timestamp;
 
-    Serial.printf("[WRIST] Steps:+%u | Streak:%u | Base:%.2f\n", 
-                  window_steps, ctx.streak, window_baseline);
+    // Serial.printf("[WRIST] Steps:+%u | Streak:%u | Base:%.2f\n", 
+    //               window_steps, ctx.streak, window_baseline);
 
     return true;
 }
@@ -147,6 +147,31 @@ bool consolidate_from_ring(reg_buffer::SampleRingBuffer& ring,
     static std::array<reg_buffer::Sample, kSamplesPerWindow> window{};
     for (size_t i = 0; i < kSamplesPerWindow; ++i) ring.pop(window[i]);
     return consolidate(window.data(), window.size(), record_out);
+}
+
+void IntervalAccumulator::reset() {
+    sum_hr_x10 = 0;
+    sum_temp_x100 = 0;
+    sum_steps = 0;
+    count = 0;
+}
+
+bool IntervalAccumulator::add(const ConsolidatedRecord& input, ConsolidatedRecord& output) {
+    sum_hr_x10 += input.avg_hr_x10;
+    sum_temp_x100 += input.avg_temp_x100;
+    sum_steps += input.step_count;
+    count++;
+
+    if (count >= kRecordsPerInterval) {
+        output.avg_hr_x10 = static_cast<uint16_t>(sum_hr_x10 / count);
+        output.avg_temp_x100 = static_cast<int16_t>(sum_temp_x100 / count);
+        output.step_count = static_cast<uint16_t>(sum_steps); // Accumulate steps
+        output.timestamp = input.timestamp; // Use timestamp of the last record
+        
+        reset();
+        return true;
+    }
+    return false;
 }
 
 } // namespace

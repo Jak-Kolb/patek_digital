@@ -16,31 +16,24 @@ struct DashboardView: View {
     // BLE manager for device connection and data
     @ObservedObject var bleManager: BLEManager
     
-    // Fetch most recent reading
-    @FetchRequest(
-        sortDescriptors: [NSSortDescriptor(keyPath: \HealthReading.timestamp, ascending: false)],
-        animation: .default
-    )
-    private var readings: FetchedResults<HealthReading>
+    // Supabase Repository
+    private let supabase = SupabaseHealthRepository()
+    
+    // Local State for Dashboard Data (Fetched from Supabase)
+    @State private var dailySteps: Int = 0
+    @State private var dailyCalories: Double = 0.0
+    @State private var latestHeartRate: Int = 0
+    @State private var latestTemperature: Double = 0.0
+    @State private var latestBattery: Int = 0
+    @State private var lastUpdate: Date?
+    @State private var isLoading: Bool = false
     
     // Animation state for heart rate pulsing
     @State private var heartPulse = false
     
-    // Calculate total steps for today
-    private var todaysTotalSteps: Int {
-        let calendar = Calendar.current
-        let startOfToday = calendar.startOfDay(for: Date())
-        
-        // Filter readings from today and sum their step counts
-        let todaysReadings = readings.filter { reading in
-            guard let timestamp = reading.timestamp else { return false }
-            return calendar.isDate(timestamp, inSameDayAs: startOfToday)
-        }
-        
-        return todaysReadings.reduce(0) { $0 + Int($1.stepCount) }
-    }
+    // Timer for auto-refresh
+    let timer = Timer.publish(every: 30, on: .main, in: .common).autoconnect()
 
-    
     var body: some View {
         NavigationView {
             ScrollView {
@@ -50,11 +43,11 @@ struct DashboardView: View {
                         .padding(.horizontal)
                     
                     // MARK: - Health Metrics Cards
-                    if let latest = readings.first {
+                    if let lastUpdate = lastUpdate {
                         // Heart Rate Card with pulsing animation
                         HealthMetricCard(
                             title: "Heart Rate",
-                            value: "\(latest.heartRate)",
+                            value: "\(latestHeartRate)",
                             unit: "bpm",
                             icon: "heart.fill",
                             color: .red,
@@ -64,8 +57,19 @@ struct DashboardView: View {
                         
                         // Step Count Card with progress ring
                         StepCountCard(
-                            steps: todaysTotalSteps,
+                            steps: dailySteps,
                             goal: 10000
+                        )
+                        .padding(.horizontal)
+                        
+                        // Calories Card (New)
+                        HealthMetricCard(
+                            title: "Calories",
+                            value: String(format: "%.0f", dailyCalories),
+                            unit: "kcal",
+                            icon: "flame.fill",
+                            color: .orange,
+                            isPulsing: false
                         )
                         .padding(.horizontal)
                         
@@ -74,82 +78,141 @@ struct DashboardView: View {
                             // Temperature Card
                             CompactMetricCard(
                                 title: "Temperature",
-                                value: String(format: "%.1f", latest.temperature),
+                                value: String(format: "%.1f", latestTemperature),
                                 unit: "°F",
                                 icon: "thermometer",
-                                color: .orange
+                                color: .blue
                             )
                             
                             // Battery Card
                             BatteryCard(
-                                level: Int(latest.batteryLevel),
-                                icon: batteryIcon(level: latest.batteryLevel),
-                                color: batteryColor(level: latest.batteryLevel)
+                                level: latestBattery,
+                                icon: batteryIcon(level: Int16(latestBattery)),
+                                color: batteryColor(level: Int16(latestBattery))
                             )
                         }
                         .padding(.horizontal)
                         
                         // MARK: - Last Update Timestamp
-                        LastUpdateView(timestamp: latest.timestamp)
+                        LastUpdateView(timestamp: lastUpdate)
                             .padding(.horizontal)
                         
                     } else {
                         // No data state
-                        NoDataView()
-                            .padding()
+                        if isLoading {
+                            ProgressView("Fetching data from cloud...")
+                                .padding()
+                        } else {
+                            NoDataView()
+                                .padding()
+                        }
                     }
                 }
                 .padding(.vertical)
             }
-            .background(Color(.systemGroupedBackground))
             .navigationTitle("Dashboard")
-            .navigationBarTitleDisplayMode(.large)
-      
+            .background(Color(UIColor.systemGroupedBackground))
+            .refreshable {
+                await fetchSupabaseData()
+            }
             .onAppear {
-                // Initialize BLE manager context
-                bleManager.setContext(context)
-                
-                // Clear all old data (TEMPORARY - remove after running once)
-//                let repository = HealthRepository(context: context)
-//                repository.deleteAllReadings()
-                
-                // Start heart pulse animation
-                withAnimation(Animation.easeInOut(duration: 1.0).repeatForever(autoreverses: true)) {
-                    heartPulse = true
+                Task {
+                    await fetchSupabaseData()
                 }
             }
-            
-            .task {
-                // Load Supabase data when view appears
-                await bleManager.fetchSupabaseData()
+            .onReceive(timer) { _ in
+                Task {
+                    await fetchSupabaseData()
+                }
             }
-            .refreshable {
-                // Pull-to-refresh functionality
-                await bleManager.fetchSupabaseData()
-            }
-            
         }
     }
     
-    // MARK: - Helper Functions
+    // MARK: - Data Fetching
     
-    /// Returns appropriate battery icon based on level
+    private func fetchSupabaseData() async {
+        // Only show explicit loading indicator if we don't have data yet
+        // (Pull-to-refresh has its own spinner)
+        if lastUpdate == nil {
+            isLoading = true
+        }
+        defer { isLoading = false }
+        
+        do {
+            // 1. Calculate time range for "Today"
+            let calendar = Calendar.current
+            let startOfDay = calendar.startOfDay(for: Date())
+            let endOfDay = calendar.date(byAdding: .day, value: 1, to: startOfDay)!
+            
+            // 2. Fetch readings from Supabase for today
+            let readings = try await supabase.fetchReadings(from: startOfDay, to: endOfDay)
+            
+            // 3. Process Data
+            if let latest = readings.last {
+                // Update latest metrics
+                latestHeartRate = Int(latest.heart_rate ?? 0)
+                // Convert C to F if needed, assuming Supabase stores C based on previous code
+                // Firmware sends C. App converts to F for display.
+                // Let's check SupabaseHealthRepository... it just returns what's in DB.
+                // Firmware sends C. BLEManager uploads C?
+                // BLEManager.swift:
+                // HealthReadingInsert(... temperature: record.temperature ...) -> record.temperature comes from FirmwareRecord
+                // FirmwareRecord: temperature: Double(tempRaw) / 100.0 -> This is C.
+                // So Supabase has C.
+                // Dashboard expects F.
+                let tempC = latest.temperature ?? 0.0
+                latestTemperature = (tempC * 9/5) + 32
+                
+                latestBattery = 100 // Placeholder as before
+                lastUpdate = latest.timestamp
+                
+                // Calculate Totals
+                dailySteps = readings.reduce(0) { $0 + (Int($1.steps ?? 0)) }
+                
+                // Calculate Calories
+                let userHeight = UserDefaults.standard.double(forKey: "userHeightInches")
+                let userWeight = UserDefaults.standard.double(forKey: "userWeightLbs")
+                let heightInches = userHeight > 0 ? userHeight : 70.0
+                let weightLbs = userWeight > 0 ? userWeight : 170.0
+                
+                let heightFeet = heightInches / 12.0
+                let strideLengthFeet = heightFeet * 0.43
+                let distanceMiles = (strideLengthFeet * Double(dailySteps)) / 5280.0
+                dailyCalories = distanceMiles * weightLbs * 0.57
+                
+            } else {
+                // No data for today
+                dailySteps = 0
+                dailyCalories = 0
+                // Keep old latest values? Or reset?
+                // If we wiped Supabase, we should reset.
+                latestHeartRate = 0
+                latestTemperature = 0
+                lastUpdate = nil
+            }
+            
+        } catch {
+            print("Error fetching dashboard data: \(error)")
+        }
+    }
+    
+    // MARK: - Helpers
+
+    
     private func batteryIcon(level: Int16) -> String {
         switch level {
-        case 75...100: return "battery.100"
-        case 50..<75: return "battery.75"
-        case 25..<50: return "battery.50"
-        case 10..<25: return "battery.25"
-        default: return "battery.0"
+        case 0...20: return "battery.25"
+        case 21...50: return "battery.50"
+        case 51...80: return "battery.75"
+        default: return "battery.100"
         }
     }
     
-    /// Returns color for battery level
     private func batteryColor(level: Int16) -> Color {
         switch level {
-        case 50...100: return .green
-        case 20..<50: return .orange
-        default: return .red
+        case 0...20: return .red
+        case 21...50: return .orange
+        default: return .green
         }
     }
 }

@@ -490,7 +490,7 @@ class BLEManager: NSObject, ObservableObject, CBCentralManagerDelegate, CBPeriph
         let recordsToUpload = sessionReadings
         sessionReadings.removeAll()
         
-        print("☁️ Uploading \(recordsToUpload.count) records to Supabase...")
+        print("☁️ Uploading \(recordsToUpload.count) 15-second consolidated records to Supabase...")
         
         Task {
             do {

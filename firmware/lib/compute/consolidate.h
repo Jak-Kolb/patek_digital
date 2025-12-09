@@ -7,7 +7,7 @@
 
 namespace consolidate {
 
-constexpr size_t kSamplesPerWindow = 125;  // 5 s @ 25 Hz
+constexpr size_t kSamplesPerWindow = 125;  // 2.5 s @ 25 Hz
 
 #pragma pack(push, 1)
 struct ConsolidatedRecord {
@@ -19,6 +19,21 @@ struct ConsolidatedRecord {
 #pragma pack(pop)
 
 static_assert(sizeof(ConsolidatedRecord) == 10, "ConsolidatedRecord must be 10 bytes");
+
+class IntervalAccumulator {
+public:
+    void reset();
+    bool add(const ConsolidatedRecord& input, ConsolidatedRecord& output);
+
+private:
+    uint32_t sum_hr_x10 = 0;
+    int32_t sum_temp_x100 = 0;
+    uint32_t sum_steps = 0;
+    int count = 0;
+    
+    // 15 seconds / 2.5 seconds per record = 6 records
+    static constexpr int kRecordsPerInterval = 6;
+};
 
 bool consolidate(const reg_buffer::Sample* samples,
                                  size_t sample_count,
