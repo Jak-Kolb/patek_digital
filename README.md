@@ -1,57 +1,27 @@
-# ESP32 Data Node Workspace
+# Patek Digital Workspace
 
-Mono-repo containing the ESP32 firmware, Fastify backend scaffold, Next.js web portal, and SwiftUI iOS companion for the ESP32 Data Node project.
+Mono-repo containing the ESP32 firmware, iOS companion app, and web portals for the Patek Digital project.
 
 ## Repository Layout
 
-- `firmware/` — PlatformIO Arduino project targeting ESP32 DevKit boards.
-- `backend/` — Fastify + TypeScript server ready to ingest payloads and push to Supabase.
-- `apps/web/` — Next.js placeholder app for visualizing stored telemetry.
-- `apps/ios/` — SwiftUI skeleton meant for future native experiences.
-- `.vscode/` — Workspace settings and extension recommendations.
+- `firmware/` — PlatformIO C++ project targeting ESP32 DevKit boards. Handles sensor data collection, local storage, and BLE communication.
+- `apps/iosApp/` — SwiftUI iOS application ("PatekDigitale") for data visualization, device management, and syncing data via Bluetooth.
+- `apps/webApp/` — Next.js web application for data dashboarding.
+- `apps/test_app/` — Simple Node.js/HTML test utility for BLE/UUID testing.
+- `backend/` — (Local only) Python backend for data processing and Supabase integration. Note: This folder is not tracked in git.
 
-## Quick start — what this repo contains
+## Quick Start
 
-This repository contains several subprojects related to the ESP32 Data Node prototype. The important directories are listed above. The rest of this README explains how to prepare your macOS development machine for building and flashing the ESP32 firmware and how to run the other services locally.
+### Firmware (ESP32)
 
-## Requirements (macOS / zsh)
+The `firmware/` directory contains scripts to erase flash, build+flash firmware, and open a serial monitor. These scripts wrap PlatformIO commands.
 
-Minimum tools you should install on your development Mac:
+**Requirements:**
 
-- Homebrew (recommended): package manager used below. Install from https://brew.sh
-- Python 3 (system Python is fine but a recent version is preferred)
-- Git
-- PlatformIO (for building/flashing the ESP32)
-- Visual Studio Code (recommended) with the PlatformIO extension (optional but convenient)
-- USB serial drivers if your board uses CP210x or CH340 (usually macOS includes CP210x; install drivers for CH340 if needed)
+- PlatformIO (CLI or VS Code extension)
+- USB drivers for your ESP32 board (CP210x or CH340)
 
-Recommended install commands (macOS / zsh):
-
-```bash
-# Install Homebrew (if you don't have it)
-/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
-
-# Install Python and git
-brew update
-brew install python git
-
-# Install PlatformIO Core (CLI)
-python3 -m pip install --upgrade pip
-python3 -m pip install platformio
-
-# Optional: Visual Studio Code + PlatformIO extension (install VS Code from https://code.visualstudio.com)
-# code --install-extension platformio.platformio-ide
-```
-
-Notes:
-
-- PlatformIO installs the toolchain for ESP32 automatically on first build. The CLI install above is sufficient for CI and command-line builds.
-- `arduino-cli` is optional; this project uses PlatformIO as its build system.
-
-## Firmware: build / erase / flash / monitor
-
-The `firmware/` directory contains scripts to erase flash, build+flash firmware, and open a serial monitor. These scripts wrap PlatformIO commands and are the easiest way to work with the board.
-
+**Build & Flash:**
 From the repo root:
 
 ```bash
@@ -66,48 +36,52 @@ cd firmware
 ./scripts/monitor.sh
 ```
 
-If you prefer PlatformIO commands directly:
+### iOS App
+
+Located in `apps/iosApp/PatekDigitale`.
+
+**Usage:**
+
+1. Open `apps/iosApp/PatekDigitale/PatekDigitale.xcodeproj` in Xcode.
+2. Ensure you have a valid development signing certificate.
+3. Build and run on a physical iOS device (Bluetooth features may not work fully in the simulator).
+
+### Web App (Next.js)
+
+Located in `apps/webApp`.
 
 ```bash
-# Build (local environment 'esp32dev')
-platformio run -e esp32dev
-
-# Erase flash
-platformio run -e esp32dev -t erase
-
-# Upload firmware
-platformio run -e esp32dev -t upload
-
-# Monitor serial output
-platformio device monitor -e esp32dev --baud 115200
+cd apps/webApp
+npm install
+npm run dev
 ```
 
-Important notes:
+### Test App
 
-- When you change `firmware/partitions_3m_fs.csv` (partition layout), you must rebuild the firmware and then erase the flash before flashing the new build. PlatformIO embeds the partition table at build time; an erase ensures old data/layout is removed.
-- If LittleFS fails to mount with errors about `partition "spiffs" could not be found`, ensure every `LittleFS.begin(...)` call in the code uses the explicit partition name (the firmware already does this) and that you rebuilt after updating the CSV.
-
-## Running the backend and web UI
-
-Backend (Fastify + TypeScript):
+Located in `apps/test_app`. A simple utility for testing connections.
 
 ```bash
-cd backend
-pnpm install   # or npm install
-pnpm dev       # or npm run dev
+cd apps/test_app
+npm install
+node server.js
 ```
 
-Web UI (Next.js):
+## System Architecture
 
-```bash
-cd web
-pnpm install
-pnpm dev
-```
+The system consists of:
 
-## Firmware internals and docs
+1.  **ESP32 Data Node**: Collects sensor data (AHT20, etc.), buffers it in a ring buffer, and stores it to the filesystem. It advertises via BLE for data syncing.
+2.  **iOS App**: Connects to the ESP32 via BLE to sync stored data, view real-time metrics, and manage device settings.
+3.  **Supabase**: Used as the cloud database. The iOS app and local backend can push data to Supabase for persistent storage and analysis.
 
-There is a dedicated firmware README describing each firmware source file, functions, and how they fit together. See `firmware/README.md` for detailed developer documentation.
+## Development Setup (macOS)
+
+Recommended tools:
+
+- **Homebrew**: `brew install python git`
+- **PlatformIO**: `pip install platformio`
+- **Node.js**: `brew install node`
+- **Xcode**: For iOS development.
 
 ## Troubleshooting
 

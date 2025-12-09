@@ -38,3 +38,6 @@ yarn-error.log*
 .pnpm-debug.log*
 apps/iosApp/PatekDigitale/saveCodeBase.py
 apps/iosApp/PatekDigitale/sourceCodeBase.txt
+
+# Backend
+backend/
