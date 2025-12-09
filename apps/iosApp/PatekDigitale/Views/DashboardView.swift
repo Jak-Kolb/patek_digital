@@ -22,6 +22,7 @@ struct DashboardView: View {
     // Local State for Dashboard Data (Fetched from Supabase)
     @State private var dailySteps: Int = 0
     @State private var dailyCalories: Double = 0.0
+    @State private var dailyDistance: Double = 0.0
     @State private var latestHeartRate: Int = 0
     @State private var latestTemperature: Double = 0.0
     @State private var latestBattery: Int = 0
@@ -70,6 +71,17 @@ struct DashboardView: View {
                             unit: "kcal",
                             icon: "flame.fill",
                             color: .orange,
+                            isPulsing: false
+                        )
+                        .padding(.horizontal)
+                        
+                        // Distance Card
+                        HealthMetricCard(
+                            title: "Distance",
+                            value: String(format: "%.2f", dailyDistance),
+                            unit: "mi",
+                            icon: "map.fill",
+                            color: .purple,
                             isPulsing: false
                         )
                         .padding(.horizontal)
@@ -184,6 +196,7 @@ struct DashboardView: View {
                 let strideLengthFeet = heightFeet * 0.43
                 let distanceMiles = (strideLengthFeet * Double(dailySteps)) / 5280.0
                 dailyCalories = distanceMiles * weightLbs * 0.57
+                dailyDistance = distanceMiles
                 
                 // Calculate Fever Status
                 // Check if temperature rises above 94 degrees for longer than 5 minutes
@@ -206,11 +219,12 @@ struct DashboardView: View {
                     }
                 }
                 hasFever = feverDetected
-                
             } else {
                 // No data for today
                 dailySteps = 0
                 dailyCalories = 0
+                dailyDistance = 0
+                // Keep old latest values? Or reset?
                 // Keep old latest values? Or reset?
                 // If we wiped Supabase, we should reset.
                 latestHeartRate = 0

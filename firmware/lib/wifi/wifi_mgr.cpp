@@ -16,21 +16,21 @@
 namespace wifi_mgr {
 
 void begin() {
-  Serial.begin(115200);
+  // Serial.begin(115200);
   delay(200);
 
   WiFi.mode(WIFI_STA);
   WiFi.begin(WIFI_SSID, WIFI_PASS);
 
-  Serial.printf("[WIFI] Connecting to %s\n", WIFI_SSID);
+  // Serial.printf("[WIFI] Connecting to %s\n", WIFI_SSID);
 
   uint32_t start = millis();
   while (WiFi.status() != WL_CONNECTED) {
     delay(500);
-    Serial.print(".");
+    // Serial.print(".");
     if (millis() - start > 10000) {  // 10 second timeout
-      Serial.println("\n[WIFI] Connection timed out.");
-      Serial.println("\nRetrying...");
+      // Serial.println("\n[WIFI] Connection timed out.");
+      // Serial.println("\nRetrying...");
       WiFi.disconnect(true);
       WiFi.begin(WIFI_SSID, WIFI_PASS);
       start = millis();
@@ -38,9 +38,9 @@ void begin() {
     }
   }
 
-  Serial.println("\nWiFi connected!");
-  Serial.print("IP address: ");
-  Serial.println(WiFi.localIP());
+  // Serial.println("\nWiFi connected!");
+  // Serial.print("IP address: ");
+  // Serial.println(WiFi.localIP());
 
 }
 
@@ -52,11 +52,11 @@ bool tick() {
   // Nothing needed here for now
   if (is_connected()) {
     // Optionally, print signal strength or other info
-    Serial.printf("Wifi Connected to %s\n", WiFi.SSID());
+    // Serial.printf("Wifi Connected to %s\n", WiFi.SSID());
     return 1;
   }
   else {
-    Serial.println("Wifi Not Connected");
+    // Serial.println("Wifi Not Connected");
     begin();
     return 0;
   }

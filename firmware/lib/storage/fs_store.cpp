@@ -25,10 +25,10 @@ bool begin(bool formatOnFail) {
     }
   }
 
-  Serial.printf("LittleFS total=%u used=%u free≈%u bytes\n",
-                (unsigned)LittleFS.totalBytes(),
-                (unsigned)LittleFS.usedBytes(),
-                (unsigned)(LittleFS.totalBytes() - LittleFS.usedBytes()));
+  // Serial.printf("LittleFS total=%u used=%u free≈%u bytes\n",
+  //               (unsigned)LittleFS.totalBytes(),
+  //               (unsigned)LittleFS.usedBytes(),
+  //               (unsigned)(LittleFS.totalBytes() - LittleFS.usedBytes()));
 
   File fp = LittleFS.open(kDataFilePath, "a");  // Ensure file exists
   if (!fp) return false;
@@ -49,16 +49,16 @@ bool append(const consolidate::ConsolidatedRecord& record){
 void printData() {
   File fp = LittleFS.open(kDataFilePath, "r");
   if (!fp) {
-    Serial.println("fs_store: Failed to open data file for reading");
+    // Serial.println("fs_store: Failed to open data file for reading");
     return;
   }
-  Serial.println("fs_store: Stored Data (offset | abs_addr):");
+  // Serial.println("fs_store: Stored Data (offset | abs_addr):");
   while (fp.available()) {
     size_t offset = fp.position();
     consolidate::ConsolidatedRecord record{};
     size_t read = fp.read(reinterpret_cast<uint8_t*>(&record), sizeof(record));
     if (read != sizeof(record)) {
-      Serial.println("fs_store: Incomplete data read");
+      // Serial.println("fs_store: Incomplete data read");
       break;
     }
     size_t abs_addr = PARTITION_BASE_ADDR + offset;
@@ -70,14 +70,14 @@ void printData() {
       strftime(time_buf, sizeof(time_buf), "%Y-%m-%d %H:%M:%S", &tm_copy);
     }
 
-    Serial.printf(
-        "fs_store: offset=%6u | addr=0x%06X: HR=%.1f bpm Temp=%.2f C Steps=%u ts=%sZ\n",
-        (unsigned)offset,
-        (unsigned)abs_addr,
-        record.avg_hr_x10 / 10.0f,
-        record.avg_temp_x100 / 100.0f,
-        record.step_count,
-        time_buf[0] ? time_buf : "(unset)");
+    // Serial.printf(
+    //     "fs_store: offset=%6u | addr=0x%06X: HR=%.1f bpm Temp=%.2f C Steps=%u ts=%sZ\n",
+    //     (unsigned)offset,
+    //     (unsigned)abs_addr,
+    //     record.avg_hr_x10 / 10.0f,
+    //     record.avg_temp_x100 / 100.0f,
+    //     record.step_count,
+    //     time_buf[0] ? time_buf : "(unset)");
   }
   fp.close();
 }
@@ -91,7 +91,7 @@ size_t size() {
 
   File file = LittleFS.open(kDataFilePath, "r");
   if (!file) {
-    Serial.println("fs_store: Failed to open data file for size check");
+    // Serial.println("fs_store: Failed to open data file for size check");
     return 0;
   }
   
@@ -119,7 +119,7 @@ void for_each_record(const std::function<bool(const consolidate::ConsolidatedRec
 
   File fp = LittleFS.open(kDataFilePath, "r");
   if (!fp) {
-    Serial.println("[FS_STORE] Failed to open data file for iteration");
+    // Serial.println("[FS_STORE] Failed to open data file for iteration");
     return;
   }
 
@@ -129,7 +129,7 @@ void for_each_record(const std::function<bool(const consolidate::ConsolidatedRec
     size_t read_bytes = fp.read(reinterpret_cast<uint8_t*>(&record), sizeof(record));
     
     if (read_bytes != sizeof(record)) {
-      Serial.printf("[FS_STORE] Incomplete record at index %u\n", static_cast<unsigned>(index));
+      // Serial.printf("[FS_STORE] Incomplete record at index %u\n", static_cast<unsigned>(index));
       break;
     }
 

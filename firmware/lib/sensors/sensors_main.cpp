@@ -56,17 +56,21 @@ static bool   g_bmi_ok = false;
 static bool bmi270_begin() {
   if (g_imu.beginI2C(BMI270_ADDR, Wire) != BMI2_OK) {
     if (g_imu.beginI2C(BMI270_ADDR_ALT, Wire) != BMI2_OK) {
-      Serial.println("BMI270: not found");
+      // Serial.println("BMI270: not found");
       g_bmi_ok = false; return false;
     }
   }
   int8_t rs;
   rs = g_imu.setAccelODR(BMI2_ACC_ODR_50HZ);
-  if (rs != BMI2_OK) Serial.printf("BMI270 accel ODR fail (%d)\n", rs);
+  if (rs != BMI2_OK) {
+    // Serial.printf("BMI270 accel ODR fail (%d)\n", rs);
+  }
   rs = g_imu.setGyroODR(BMI2_GYR_ODR_50HZ);
-  if (rs != BMI2_OK) Serial.printf("BMI270 gyro ODR fail (%d)\n", rs);
+  if (rs != BMI2_OK) {
+    // Serial.printf("BMI270 gyro ODR fail (%d)\n", rs);
+  }
   g_bmi_ok = true;
-  Serial.println("BMI270 ready");
+  // Serial.println("BMI270 ready");
   return true;
 }
 struct ImuSample { float ax, ay, az; float gx, gy, gz; float tempC; bool ok; };
@@ -103,7 +107,7 @@ static int getMedianHr();
 static bool max30102_begin() {
   // Initialize sensor
   if (!particleSensor.begin(Wire, I2C_SPEED_FAST)) { // Use default I2C port, 400kHz speed
-    Serial.println("MAX30102: not found");
+    // Serial.println("MAX30102: not found");
     return false;
   }
 
@@ -119,7 +123,7 @@ static bool max30102_begin() {
   particleSensor.setPulseAmplitudeRed(ledBrightness);
   particleSensor.setPulseAmplitudeGreen(0); // Turn off Green LED
   
-  Serial.println("MAX30102 ready");
+  // Serial.println("MAX30102 ready");
   return true;
 }
 
@@ -128,8 +132,13 @@ static bool max30102_begin() {
 // --- MAX30205 ---
 static bool max30205_ok = false;
 static bool max30205_begin() {
-  if (!i2c_ping(MAX30205_ADDR)) { Serial.println("MAX30205: not found"); return false; }
-  max30205_ok = true; Serial.println("MAX30205 ready"); return true;
+  if (!i2c_ping(MAX30205_ADDR)) { 
+    // Serial.println("MAX30205: not found"); 
+    return false; 
+  }
+  max30205_ok = true; 
+  // Serial.println("MAX30205 ready"); 
+  return true;
 }
 static bool max30205_readTemp(float &c) {
   if (!max30205_ok) return false;
@@ -208,7 +217,7 @@ void sensors_setup(reg_buffer::SampleRingBuffer* buffer) {
   g_targetBuffer = buffer;
   // Serial.begin(115200);
   // delay(500);
-  Serial.println("\nTimed sensor sampling demo (Phase 2 - Optimized)");
+  // Serial.println("\nTimed sensor sampling demo (Phase 2 - Optimized)");
   Wire.begin(I2C_SDA_PIN, I2C_SCL_PIN);
   Wire.setClock(I2C_CLOCK_HZ); // full speed for sensor throughput; adjust if bus stability issues
   delay(10);
@@ -341,18 +350,18 @@ static void sensorsTask(void* arg) {
       double bodyTCAvg = tempCount ? bodyTempCSum / tempCount : NAN;
       double bodyTFAvg = tempCount ? bodyTempFSum / tempCount : NAN;
 
-      Serial.printf("1s AVG IMU at sample rate %uHz (target 50) a[g]=[% .3f % .3f % .3f] g[dps]=[% .2f % .2f % .2f]", imuCount, axAvg, ayAvg, azAvg, gxAvg, gyAvg, gzAvg);
-      if (!isnan(imuTempFAvg)) Serial.printf(" imuT=%.1fF", imuTempFAvg);
-      Serial.print("\n");
-        Serial.printf("1s AVG PPG at sample rate %uHz (target 100) RED=%.0f IR=%.0f\n", ppgCount, redAvg, irAvg);
-        Serial.printf("HR=%d BPM (Avg)\n", beatAvg);
-        Serial.printf("HR=%.1f BPM (Recent)\n", beatsPerMinute);
-        if (!isnan(bodyTCAvg)) {
-          Serial.printf("1s AVG BodyTemp at sample rate %uHz: %.2fC (%.2fF)\n", tempCount, bodyTCAvg, bodyTFAvg);
-        } else {
-          Serial.println("1s AVG BodyTemp: no samples");
-        }
-        Serial.println("---");
+      // Serial.printf("1s AVG IMU at sample rate %uHz (target 50) a[g]=[% .3f % .3f % .3f] g[dps]=[% .2f % .2f % .2f]", imuCount, axAvg, ayAvg, azAvg, gxAvg, gyAvg, gzAvg);
+      // if (!isnan(imuTempFAvg)) Serial.printf(" imuT=%.1fF", imuTempFAvg);
+      // Serial.print("\n");
+      //   Serial.printf("1s AVG PPG at sample rate %uHz (target 100) RED=%.0f IR=%.0f\n", ppgCount, redAvg, irAvg);
+      //   Serial.printf("HR=%d BPM (Avg)\n", beatAvg);
+      //   Serial.printf("HR=%.1f BPM (Recent)\n", beatsPerMinute);
+      //   if (!isnan(bodyTCAvg)) {
+      //     Serial.printf("1s AVG BodyTemp at sample rate %uHz: %.2fC (%.2fF)\n", tempCount, bodyTCAvg, bodyTFAvg);
+      //   } else {
+      //     Serial.println("1s AVG BodyTemp: no samples");
+      //   }
+      //   Serial.println("---");
         // Reset accumulators for next window
         axSum=aySum=azSum=gxSum=gySum=gzSum=imuTempSumF=0; imuCount=0;
         redSum=irSum=0; ppgCount=0;

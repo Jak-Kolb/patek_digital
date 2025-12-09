@@ -30,7 +30,7 @@ void BLEServerClass::begin() {
     NimBLEDevice::getAdvertising()->addServiceUUID(kServiceUuid);
     NimBLEDevice::startAdvertising();
 
-    Serial.println("[BLE] Service Started");
+    // Serial.println("[BLE] Service Started");
 }
 
 // ============================================================================
@@ -39,19 +39,19 @@ void BLEServerClass::begin() {
 
 void BLEServerClass::onConnect(NimBLEServer* pServer) {
     deviceConnected = true;
-    Serial.println("[BLE] Connected");
+    // Serial.println("[BLE] Connected");
 }
 
 void BLEServerClass::onDisconnect(NimBLEServer* pServer) {
     deviceConnected = false;
-    Serial.println("[BLE] Disconnected");
+    // Serial.println("[BLE] Disconnected");
 }
 
 void BLEServerClass::onWrite(NimBLECharacteristic* characteristic) {
     std::string val = characteristic->getValue();
     if (val.empty()) return;
 
-    Serial.printf("[BLE] Cmd: %s\n", val.c_str());
+    // Serial.printf("[BLE] Cmd: %s\n", val.c_str());
 
     if (val == kCmdSend) {
         _sendRequested = true; // Set flag for main loop
@@ -85,7 +85,7 @@ void BLEServerClass::stream_all_records() {
     if (onTransferStart) onTransferStart();
 
     size_t count = fs_store::record_count();
-    Serial.printf("[BLE] Streaming %u records...\n", count);
+    // Serial.printf("[BLE] Streaming %u records...\n", count);
 
     // 1. Send Start
     uint8_t startBuf[5] = {kStartMarker};
@@ -103,7 +103,7 @@ void BLEServerClass::stream_all_records() {
         memcpy(&packet[1], &rec, sizeof(rec));
 
         if (!notify(packet, sizeof(packet))) {
-            Serial.println("[BLE] Congestion drop");
+            // Serial.println("[BLE] Congestion drop");
         }
 
         delay(15); // Critical for flow control
@@ -114,7 +114,7 @@ void BLEServerClass::stream_all_records() {
     uint8_t endMarker = kEndMarker;
     notify(&endMarker, 1);
 
-    Serial.println("[BLE] Done");
+    // Serial.println("[BLE] Done");
     if (onTransferComplete) onTransferComplete();
 }
 

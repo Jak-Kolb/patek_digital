@@ -25,18 +25,18 @@ void reset_fallback_clock() {
 }
 
 void handle_ble_erase() {
-  Serial.println("[BLE] Erase command received");
+  // Serial.println("[BLE] Erase command received");
   if (fs_store::erase()) {
-    Serial.println("[BLE] Filesystem data cleared");
+    // Serial.println("[BLE] Filesystem data cleared");
   } else {
-    Serial.println("[BLE] Filesystem erase failed");
+    // Serial.println("[BLE] Filesystem erase failed");
   }
   reset_fallback_clock();
   gResetRingRequested = true;
 }
 
 void handle_ble_time_sync(time_t epoch) {
-  Serial.printf("[BLE] Time sync epoch=%lld\n", static_cast<long long>(epoch));
+  // Serial.printf("[BLE] Time sync epoch=%lld\n", static_cast<long long>(epoch));
   struct timeval tv;
   tv.tv_sec = epoch;
   tv.tv_usec = 0;
@@ -45,11 +45,11 @@ void handle_ble_time_sync(time_t epoch) {
 }
 
 void handle_transfer_start() {
-  Serial.println("[BLE] Transfer starting");
+  // Serial.println("[BLE] Transfer starting");
 }
 
 void handle_transfer_complete() {
-  Serial.println("[BLE] Transfer complete");
+  // Serial.println("[BLE] Transfer complete");
 }
 
 }  // namespace
@@ -58,20 +58,20 @@ void handle_transfer_complete() {
 
 
 void setup() {
-  Serial.begin(115200);
+  // Serial.begin(115200);
   delay(200);
-  Serial.println();
-  Serial.println("============================");
-  Serial.println("ESP32 Data Node Boot");
-  Serial.println("============================");
+  // Serial.println();
+  // Serial.println("============================");
+  // Serial.println("ESP32 Data Node Boot");
+  // Serial.println("============================");
 
   // Initialize filesystem first
   if (!fs_store::begin(true)) { // format on fail is true
-    Serial.println("[MAIN] Filesystem init failed.");
+    // Serial.println("[MAIN] Filesystem init failed.");
     return; // Don't continue if filesystem fails
   }
   else {
-    Serial.println("[MAIN] Filesystem initialized successfully.");
+    // Serial.println("[MAIN] Filesystem initialized successfully.");
   }
 
   reset_fallback_clock();
@@ -82,7 +82,7 @@ void setup() {
   bleServer.onTimeSync = handle_ble_time_sync;
   bleServer.onTransferStart = handle_transfer_start;
   bleServer.onTransferComplete = handle_transfer_complete;
-  Serial.println("[MAIN] BLE server initialized");
+  // Serial.println("[MAIN] BLE server initialized");
 
   sensors_setup(&gRing);
 }
@@ -146,15 +146,15 @@ void loop() {
   if (consolidate::consolidate_from_ring(gRing, record)) {
     consolidate::ConsolidatedRecord intervalRecord{};
     if (gAccumulator.add(record, intervalRecord)) {
-      Serial.printf("[MAIN] 15s Interval accumulated: Steps=%u HR=%.1f Temp=%.2f\n", 
-          intervalRecord.step_count, 
-          intervalRecord.avg_hr_x10/10.0, 
-          intervalRecord.avg_temp_x100/100.0);
+      // Serial.printf("[MAIN] 15s Interval accumulated: Steps=%u HR=%.1f Temp=%.2f\n", 
+      //     intervalRecord.step_count, 
+      //     intervalRecord.avg_hr_x10/10.0, 
+      //     intervalRecord.avg_temp_x100/100.0);
 
       if (fs_store::append(intervalRecord)) {
-        Serial.println("[STORE] Interval record appended");
+        // Serial.println("[STORE] Interval record appended");
       } else {
-        Serial.println("[STORE] Failed to append interval record");
+        // Serial.println("[STORE] Failed to append interval record");
       }
     }
   }
