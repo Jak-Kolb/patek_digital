@@ -1,7 +1,0 @@
-fastapi
-uvicorn
-supabase
-pydantic
-python-dotenv
-bleak
-httpx
